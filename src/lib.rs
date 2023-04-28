@@ -1,8 +1,13 @@
+mod debug;
+
 use std::ffi::c_void;
 use windows::Win32::Foundation::BOOL;
 use windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
 
-fn main() {}
+fn main() {
+    debug::init();
+    debug::info("GrimMod attached to GrimFandango.exe");
+}
 
 #[no_mangle]
 pub extern "system" fn DllMain(
