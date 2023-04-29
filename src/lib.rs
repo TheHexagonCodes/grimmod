@@ -1,4 +1,7 @@
 mod debug;
+mod process;
+
+use process::Process;
 
 use std::ffi::c_void;
 use windows::Win32::Foundation::BOOL;
@@ -7,6 +10,13 @@ use windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
 fn main() {
     debug::init();
     debug::info("GrimMod attached to GrimFandango.exe");
+
+    match Process::init() {
+        Some(process) => {
+            debug::info(format!("Base memory address found: {:?}", process.base_address).as_ref())
+        }
+        None => debug::error("Could not find base memory address for GrimFandango.exe"),
+    };
 }
 
 #[no_mangle]
