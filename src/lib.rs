@@ -13,9 +13,14 @@ fn main() {
 
     match Process::init() {
         Some(process) => {
-            debug::info(format!("Base memory address found: {:?}", process.base_address).as_ref())
+            debug::info(format!(
+                "Base memory address found: {:x}",
+                process.base_address
+            ));
         }
-        None => debug::error("Could not find base memory address for GrimFandango.exe"),
+        None => {
+            debug::error("Could not find base memory address for GrimFandango.exe");
+        }
     };
 }
 
