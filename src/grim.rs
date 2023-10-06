@@ -3,7 +3,7 @@ use crate::process;
 use std::ffi::{c_char, c_int, c_void};
 use std::mem;
 
-pub mod addresses {
+pub mod address {
     // file operation functions that work with LAB packed files
     pub const OPEN_FILE: usize = 0x0034EF80;
     pub const CLOSE_FILE: usize = 0x0034C870;
@@ -20,7 +20,7 @@ type FileReader = extern "C" fn(*mut c_void, *mut c_void, usize) -> usize;
 #[inline(always)]
 pub fn open_file(filename: *mut c_char, mode: *mut c_char) -> *mut c_void {
     unsafe {
-        let f: FileOpener = mem::transmute(addresses::OPEN_FILE);
+        let f: FileOpener = mem::transmute(address::OPEN_FILE);
         f(filename, mode)
     }
 }
@@ -28,7 +28,7 @@ pub fn open_file(filename: *mut c_char, mode: *mut c_char) -> *mut c_void {
 #[inline(always)]
 pub fn close_file(file: *mut c_void) -> c_int {
     unsafe {
-        let f: FileCloser = mem::transmute(addresses::CLOSE_FILE);
+        let f: FileCloser = mem::transmute(address::CLOSE_FILE);
         f(file)
     }
 }
@@ -36,7 +36,7 @@ pub fn close_file(file: *mut c_void) -> c_int {
 #[inline(always)]
 pub fn read_file(file: *mut c_void, dst: *mut c_void, size: usize) -> usize {
     unsafe {
-        let f: FileReader = mem::transmute(addresses::READ_FILE);
+        let f: FileReader = mem::transmute(address::READ_FILE);
         f(file, dst, size)
     }
 }
@@ -57,7 +57,7 @@ pub struct RuntimeContext {
 #[inline(always)]
 pub fn with_runtime_context<F: FnOnce(&mut RuntimeContext)>(f: F) {
     unsafe {
-        let runtime_context = process::read::<usize>(addresses::RUNTIME_CONTEXT_PTR);
+        let runtime_context = process::read::<usize>(address::RUNTIME_CONTEXT_PTR);
         process::with_mut_ref(runtime_context, f)
     }
 }
