@@ -40,10 +40,9 @@ impl Process {
         *(fixed as *const T)
     }
 
-    pub unsafe fn write<T: Sized>(&self, address: usize, value: T) {
+    pub unsafe fn with_mut_ref<T, F: FnOnce(&mut T)>(&self, address: usize, block: F) {
         let fixed = self.base_address + address;
         let mut existing_flags: PAGE_PROTECTION_FLAGS = std::mem::zeroed();
-
         VirtualProtect(
             address as *mut _,
             std::mem::size_of::<T>(),
@@ -51,7 +50,8 @@ impl Process {
             &mut existing_flags,
         );
 
-        *(fixed as *mut T) = value;
+        let value = &mut *(fixed as *mut T);
+        block(value);
 
         VirtualProtect(
             address as *mut _,
@@ -59,5 +59,11 @@ impl Process {
             existing_flags,
             &mut existing_flags,
         );
+    }
+
+    pub unsafe fn write<T: Sized>(&self, address: usize, value: T) {
+        self.with_mut_ref(address, |reference| {
+            *reference = value;
+        });
     }
 }
