@@ -1,7 +1,9 @@
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::BOOL;
-use windows::Win32::System::Diagnostics::Debug::{ReadProcessMemory, WriteProcessMemory};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::Memory::{
+    VirtualProtect, PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS,
+};
 use windows::Win32::System::ProcessStatus::{GetModuleInformation, MODULEINFO};
 use windows::Win32::System::Threading::GetCurrentProcess;
 
@@ -33,38 +35,29 @@ impl Process {
         }
     }
 
-    pub fn read<T: Sized>(&self, offset: usize) -> T {
-        let address = self.base_address + offset;
-
-        unsafe {
-            let process_handle = GetCurrentProcess();
-            let mut value: T = std::mem::zeroed();
-
-            ReadProcessMemory(
-                process_handle,
-                address as *mut _,
-                &mut value as *mut T as *mut _,
-                std::mem::size_of::<T>(),
-                None,
-            );
-
-            value
-        }
+    pub unsafe fn read<T: Sized + Copy>(&self, address: usize) -> T {
+        let fixed = self.base_address + address;
+        *(fixed as *const T)
     }
 
-    pub fn write<T: Sized>(&self, offset: usize, value: T) {
-        let address = self.base_address + offset;
-        let size = std::mem::size_of::<T>();
+    pub unsafe fn write<T: Sized>(&self, address: usize, value: T) {
+        let fixed = self.base_address + address;
+        let mut existing_flags: PAGE_PROTECTION_FLAGS = std::mem::zeroed();
 
-        unsafe {
-            let process_handle = GetCurrentProcess();
-            let _result = WriteProcessMemory(
-                process_handle,
-                address as *mut _,
-                &value as *const T as *const _,
-                size,
-                None,
-            );
-        }
+        VirtualProtect(
+            address as *mut _,
+            std::mem::size_of::<T>(),
+            PAGE_EXECUTE_READWRITE,
+            &mut existing_flags,
+        );
+
+        *(fixed as *mut T) = value;
+
+        VirtualProtect(
+            address as *mut _,
+            std::mem::size_of::<T>(),
+            existing_flags,
+            &mut existing_flags,
+        );
     }
 }
