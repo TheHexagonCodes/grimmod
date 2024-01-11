@@ -11,21 +11,17 @@ fn main() {
     debug::init();
     debug::info("GrimMod attached to GrimFandango.exe");
 
-    if process::init() {
-        debug::info(format!(
-            "Base memory address found: {:x}",
-            process::base_address()
-        ));
+    debug::info(format!(
+        "Base memory address found: 0x{:x}",
+        *process::BASE_ADDRESS
+    ));
 
-        // Replace the game's IO functions with the mod loader
-        grim::with_runtime_context(|runtime_context| {
-            runtime_context.open_file = file::open as *const _;
-            runtime_context.close_file = file::close as *const _;
-            runtime_context.read_file = file::read as *const _;
-        });
-    } else {
-        debug::error("Could not find base memory address for GrimFandango.exe");
-    };
+    // Replace the game's IO functions with the mod loader
+    grim::with_runtime_context(|runtime_context| {
+        runtime_context.open_file = file::open as *const _;
+        runtime_context.close_file = file::close as *const _;
+        runtime_context.read_file = file::read as *const _;
+    });
 }
 
 #[no_mangle]

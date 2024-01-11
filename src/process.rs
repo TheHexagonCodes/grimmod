@@ -1,3 +1,4 @@
+use lazy_static::lazy_static;
 use std::sync::Mutex;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::BOOL;
@@ -8,34 +9,11 @@ use windows::Win32::System::Memory::{
 use windows::Win32::System::ProcessStatus::{GetModuleInformation, MODULEINFO};
 use windows::Win32::System::Threading::GetCurrentProcess;
 
-static BASE_ADDRESS: Mutex<usize> = Mutex::new(0);
-
-/// A memory address, either absolute or relative to the base address
-pub enum Address {
-    Absolute(usize),
-    Relative(usize),
+lazy_static! {
+    pub static ref BASE_ADDRESS: usize = base_address().unwrap_or(0);
 }
 
-impl Address {
-    pub fn absolute(self) -> usize {
-        match self {
-            Address::Absolute(address) => address,
-            Address::Relative(address) => base_address() + address,
-        }
-    }
-}
-
-pub fn init() -> bool {
-    match calculate_base_address() {
-        Some(base_address) => {
-            *BASE_ADDRESS.lock().unwrap() = base_address;
-            true
-        }
-        None => false,
-    }
-}
-
-pub fn calculate_base_address() -> Option<usize> {
+pub fn base_address() -> Option<usize> {
     unsafe {
         let process_handle = GetCurrentProcess();
         let hmodule = GetModuleHandleW(PCWSTR::null()).ok()?;
@@ -50,37 +28,36 @@ pub fn calculate_base_address() -> Option<usize> {
     }
 }
 
-pub fn base_address() -> usize {
-    *BASE_ADDRESS.lock().unwrap()
+pub fn relative_address(address: usize) -> usize {
+    *BASE_ADDRESS + address
 }
 
-pub unsafe fn read<T: Sized + Copy>(address: Address) -> T {
-    *(address.absolute() as *const T)
+pub unsafe fn read<T: Sized + Copy>(address: usize) -> T {
+    *(address as *const T)
 }
 
-pub unsafe fn with_mut_ref<T, F: FnOnce(&mut T)>(address: Address, block: F) {
-    let absolute = address.absolute();
+pub unsafe fn with_mut_ref<T, F: FnOnce(&mut T)>(address: usize, block: F) {
     let mut existing_flags: PAGE_PROTECTION_FLAGS = std::mem::zeroed();
 
     VirtualProtect(
-        absolute as *mut _,
+        address as *mut _,
         std::mem::size_of::<T>(),
         PAGE_EXECUTE_READWRITE,
         &mut existing_flags,
     );
 
-    let value = &mut *(absolute as *mut T);
+    let value = &mut *(address as *mut T);
     block(value);
 
     VirtualProtect(
-        absolute as *mut _,
+        address as *mut _,
         std::mem::size_of::<T>(),
         existing_flags,
         &mut existing_flags,
     );
 }
 
-pub unsafe fn write<T: Sized>(address: Address, value: T) {
+pub unsafe fn write<T: Sized>(address: usize, value: T) {
     with_mut_ref(address, |reference| {
         *reference = value;
     });
