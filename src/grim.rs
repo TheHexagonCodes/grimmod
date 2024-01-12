@@ -13,6 +13,8 @@ pub mod address {
         pub static ref CLOSE_FILE: usize = relative(0x1C870);
         pub static ref READ_FILE: usize = relative(0x1E050);
 
+        pub static ref OPEN_BM_IMAGE: usize = relative(0xDADE0);
+
         // contains the address for the RuntimeContext in use by the game
         pub static ref RUNTIME_CONTEXT_PTR: usize = relative(0x31B2CD8);
     }
@@ -66,3 +68,5 @@ pub fn with_runtime_context<F: FnOnce(&mut RuntimeContext)>(f: F) {
         process::with_mut_ref(runtime_context, f)
     }
 }
+
+pub type OpenBmImage = extern "C" fn(*const c_char, u32, u32) -> *mut ImageContainer;

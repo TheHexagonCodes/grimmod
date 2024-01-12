@@ -1,6 +1,7 @@
 mod debug;
 mod file;
 mod grim;
+mod image;
 mod process;
 
 use std::ffi::c_void;
@@ -22,6 +23,10 @@ fn main() {
         runtime_context.close_file = file::close as *const _;
         runtime_context.read_file = file::read as *const _;
     });
+
+    unsafe {
+        image::OPEN_BM_IMAGE_HOOK.enable().ok();
+    };
 }
 
 #[no_mangle]
