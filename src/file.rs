@@ -17,7 +17,7 @@ extern "C" {
 }
 
 /// Finds the path to a modded resource, if one exists
-pub fn find_modded_file(filename: &str) -> Option<PathBuf> {
+pub fn find_modded(filename: &str) -> Option<PathBuf> {
     let mut entries = glob(format!("./Mods/*/resources/{}", filename).as_ref()).unwrap();
     entries.next().map(Result::unwrap)
 }
@@ -28,7 +28,7 @@ pub extern "C" fn open(raw_filename: *mut c_char, mode: *mut c_char) -> *mut c_v
         return std::ptr::null_mut();
     };
 
-    match find_modded_file(filename) {
+    match find_modded(filename) {
         None => grim::open_file(raw_filename, mode),
         Some(path) => {
             debug::info(format!("Opening modded file: {}", path.display()));
