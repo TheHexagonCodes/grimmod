@@ -29,6 +29,7 @@ fn main() {
         image::SURFACE_UPLOAD_HOOK.enable().ok();
         image::COPY_IMAGE_HOOK.enable().ok();
         image::DECOMPRESS_IMAGE_HOOK.enable().ok();
+        image::MANAGE_RESOURCE_HOOK.enable().ok();
     };
 }
 

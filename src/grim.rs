@@ -18,6 +18,7 @@ pub mod address {
         pub static ref SURFACE_UPLOAD: usize = relative(0xE8A80);
         pub static ref COPY_IMAGE: usize = relative(0xE5EC0);
         pub static ref DECOMPRESS_IMAGE: usize = relative(0x24D20);
+        pub static ref MANAGE_RESOURCE: usize = relative(0x2B340);
 
         // various buffers used for rendering textures
         pub static ref DECOMPRESSION_BUFFER_PTR: usize = relative(0x1691C78);
@@ -86,6 +87,8 @@ pub type CopyImage =
     extern "C" fn(*mut Image, *mut c_void, *mut Image, *mut c_void, u32, u32, u32, u32);
 
 pub type SurfaceUpload = extern "C" fn(*mut Surface, *mut c_void);
+
+pub type ManageResource = extern "C" fn(*mut Resource) -> c_int;
 
 /// Everything associated with a render pass (background, z-buffer, shadows, etc.)
 ///
@@ -192,4 +195,13 @@ pub struct Surface {
     pub param_10: u32,
     pub param_11: u32,
     pub param_12: u32,
+}
+
+#[repr(C)]
+pub struct Resource {
+    pub state: u32,
+    pub filename: *const c_char,
+    pub kind: *const c_char,
+    pub asset: *const c_void,
+    pub size: isize,
 }

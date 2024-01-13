@@ -40,6 +40,13 @@ lazy_static! {
         )
         .unwrap()
     };
+    pub static ref MANAGE_RESOURCE_HOOK: RawDetour = unsafe {
+        RawDetour::new(
+            *grim::address::MANAGE_RESOURCE as *const (),
+            manage_resource as *const (),
+        )
+        .unwrap()
+    };
 }
 
 pub struct HqImage {
@@ -242,4 +249,20 @@ pub unsafe extern "C" fn surface_upload(surface: *mut grim::Surface, image_data:
 
         break;
     }
+}
+
+pub extern "C" fn manage_resource(resource: *mut grim::Resource) -> c_int {
+    let original: grim::ManageResource =
+        unsafe { std::mem::transmute(MANAGE_RESOURCE_HOOK.trampoline()) };
+    let state = unsafe { (*resource).state };
+    let asset = unsafe { (*resource).asset as usize };
+
+    if state == 2 {
+        HQ_IMAGES
+            .lock()
+            .unwrap()
+            .retain(|hq_image| hq_image.original_image != asset);
+    }
+
+    original(resource)
 }
