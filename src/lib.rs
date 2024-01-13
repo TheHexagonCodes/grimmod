@@ -17,12 +17,12 @@ fn main() {
         *process::BASE_ADDRESS
     ));
 
-    // Replace the game's IO functions with the mod loader
-    grim::with_runtime_context(|runtime_context| {
-        runtime_context.open_file = file::open as *const _;
-        runtime_context.close_file = file::close as *const _;
-        runtime_context.read_file = file::read as *const _;
-    });
+    // Hook the game's IO functions to load modded files
+    unsafe {
+        file::OPEN_FILE_HOOK.enable().ok();
+        file::CLOSE_FILE_HOOK.enable().ok();
+        file::READ_FILE_HOOK.enable().ok();
+    }
 
     unsafe {
         image::OPEN_BM_IMAGE_HOOK.enable().ok();
