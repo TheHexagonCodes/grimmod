@@ -1,5 +1,4 @@
 use lazy_static::lazy_static;
-use std::sync::Mutex;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::BOOL;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;

@@ -1,7 +1,7 @@
-use crate::process;
-
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::mem;
+
+use crate::process;
 
 pub mod address {
     use crate::process::relative_address as relative;

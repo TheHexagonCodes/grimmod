@@ -1,14 +1,14 @@
-use crate::debug;
-use crate::file;
-use crate::grim;
-use crate::process;
-
 use lazy_static::lazy_static;
 use retour::RawDetour;
 use std::ffi::c_void;
 use std::ffi::{c_char, c_int, c_uint, CStr};
 use std::path::Path;
 use std::sync::Mutex;
+
+use crate::debug;
+use crate::file;
+use crate::grim;
+use crate::process;
 
 lazy_static! {
     pub static ref HQ_IMAGES: Mutex<Vec<HqImage>> = Mutex::new(Vec::new());
