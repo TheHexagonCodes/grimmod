@@ -30,17 +30,15 @@ pub mod address {
     }
 }
 
-pub type FileOpener = extern "C" fn(*mut c_char, *mut c_char) -> *mut c_void;
-pub type FileCloser = extern "C" fn(*mut c_void) -> c_int;
-pub type FileReader = extern "C" fn(*mut c_void, *mut c_void, usize) -> usize;
+pub type OpenFile = extern "C" fn(*mut c_char, *mut c_char) -> *mut c_void;
+pub type CloseFile = extern "C" fn(*mut c_void) -> c_int;
+pub type ReadFile = extern "C" fn(*mut c_void, *mut c_void, usize) -> usize;
 
 pub type OpenBmImage = extern "C" fn(*const c_char, u32, u32) -> *mut ImageContainer;
-
 pub type CopyImage =
     extern "C" fn(*mut Image, *mut c_void, *mut Image, *mut c_void, u32, u32, u32, u32);
-
 pub type SurfaceUpload = extern "C" fn(*mut Surface, *mut c_void);
-
+pub type DecompressImage = extern "C" fn(*const Image);
 pub type ManageResource = extern "C" fn(*mut Resource) -> c_int;
 
 /// Everything associated with a render pass (background, z-buffer, shadows, etc.)
