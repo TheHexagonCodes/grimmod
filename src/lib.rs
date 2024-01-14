@@ -21,17 +21,17 @@ fn main() {
 
     // Hook the game's IO functions to load modded files
     unsafe {
-        file::OPEN_FILE_HOOK.enable().ok();
-        file::CLOSE_FILE_HOOK.enable().ok();
-        file::READ_FILE_HOOK.enable().ok();
+        grim::open_file.hook(file::open as grim::OpenFile);
+        grim::close_file.hook(file::close as grim::CloseFile);
+        grim::read_file.hook(file::read as grim::ReadFile);
     }
 
     unsafe {
-        image::OPEN_BM_IMAGE_HOOK.enable().ok();
-        image::SURFACE_UPLOAD_HOOK.enable().ok();
-        image::COPY_IMAGE_HOOK.enable().ok();
-        image::DECOMPRESS_IMAGE_HOOK.enable().ok();
-        image::MANAGE_RESOURCE_HOOK.enable().ok();
+        grim::open_bm_image.hook(image::open_bm_image as grim::OpenBmImage);
+        grim::surface_upload.hook(image::surface_upload as grim::SurfaceUpload);
+        grim::copy_image.hook(image::copy_image as grim::CopyImage);
+        grim::decompress_image.hook(image::decompress_image as grim::DecompressImage);
+        grim::manage_resource.hook(image::manage_resource as grim::ManageResource);
     };
 }
 

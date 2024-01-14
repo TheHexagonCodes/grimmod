@@ -86,9 +86,7 @@ pub extern "C" fn open_bm_image(
     param_2: u32,
     param_3: u32,
 ) -> *mut grim::ImageContainer {
-    let original: grim::OpenBmImage =
-        unsafe { std::mem::transmute(OPEN_BM_IMAGE_HOOK.trampoline()) };
-    let image_container = original(raw_filename, param_2, param_3);
+    let image_container = unsafe { grim::open_bm_image(raw_filename, param_2, param_3) };
 
     if let Ok(filename) = unsafe { CStr::from_ptr(raw_filename) }.to_str() {
         debug::info(format!("Opening BM: {}", filename));
@@ -129,7 +127,7 @@ fn open_hq_image(filename: &str, image_container_addr: usize) -> Option<HqImage>
 /// Decompresses an image into the global decompression buffer
 ///
 /// This is a overload for a native function that will be hooked
-pub extern "C" fn decompress_image(image: *const grim::Image) -> c_void {
+pub extern "C" fn decompress_image(image: *const grim::Image) {
     // check for an image with an associated hq image getting decompressed
     // it will shortly be copied to the clean buffer and soon rendered
     for hq_image in HQ_IMAGES.lock().unwrap().iter_mut() {
@@ -143,11 +141,7 @@ pub extern "C" fn decompress_image(image: *const grim::Image) -> c_void {
         }
     }
 
-    unsafe {
-        let original: fn(*const grim::Image) -> c_void =
-            std::mem::transmute(DECOMPRESS_IMAGE_HOOK.trampoline());
-        original(image)
-    }
+    unsafe { grim::decompress_image(image) }
 }
 
 /// Copy an image and surface from a source to a pre-allocated destination
@@ -174,17 +168,18 @@ pub extern "C" fn copy_image(
         }
     }
 
-    let original: grim::CopyImage = unsafe { std::mem::transmute(COPY_IMAGE_HOOK.trampoline()) };
-    original(
-        dst_image,
-        dst_surface,
-        src_image,
-        src_surface,
-        param_5,
-        param_6,
-        param_7,
-        param_8,
-    );
+    unsafe {
+        grim::copy_image(
+            dst_image,
+            dst_surface,
+            src_image,
+            src_surface,
+            param_5,
+            param_6,
+            param_7,
+            param_8,
+        )
+    }
 }
 
 extern "stdcall" {
@@ -206,12 +201,12 @@ extern "stdcall" {
 }
 
 /// Prepare a surface (aka texture) for uploading to the GPU or upload it now
-pub unsafe extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c_void) {
-    let original: grim::SurfaceUpload = std::mem::transmute(SURFACE_UPLOAD_HOOK.trampoline());
-
-    // call with null to reset the buffer size as it might have been changed by a hq image
-    original(surface, std::ptr::null_mut());
-    original(surface, image_data);
+pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c_void) {
+    unsafe {
+        // call with null to reset the buffer size as it might have been changed by a hq image
+        grim::surface_upload(surface, std::ptr::null_mut());
+        grim::surface_upload(surface, image_data);
+    }
 
     // check if the "bitmap underlays" surface's data is being uploaded
     // this signals that the active background is being set
@@ -232,28 +227,28 @@ pub unsafe extern "C" fn surface_upload(surface: *mut grim::Surface, image_data:
 
         let hq_image_data: *const [u8] = hq_image.buffer.as_ref();
 
-        glPixelStorei(0xCF5, 1);
-        glBindTexture(0xDE1, (*surface).texture_id);
-        glPixelStorei(0xCF2, hq_image.width as i32);
-        glTexImage2D(
-            0xDE1,
-            0,
-            0x1907,
-            hq_image.width as i32,
-            hq_image.height as i32,
-            0,
-            0x1907,
-            0x1401,
-            hq_image_data as *const c_void,
-        );
+        unsafe {
+            glPixelStorei(0xCF5, 1);
+            glBindTexture(0xDE1, (*surface).texture_id);
+            glPixelStorei(0xCF2, hq_image.width as i32);
+            glTexImage2D(
+                0xDE1,
+                0,
+                0x1907,
+                hq_image.width as i32,
+                hq_image.height as i32,
+                0,
+                0x1907,
+                0x1401,
+                hq_image_data as *const c_void,
+            );
+        }
 
         break;
     }
 }
 
 pub extern "C" fn manage_resource(resource: *mut grim::Resource) -> c_int {
-    let original: grim::ManageResource =
-        unsafe { std::mem::transmute(MANAGE_RESOURCE_HOOK.trampoline()) };
     let state = unsafe { (*resource).state };
     let asset = unsafe { (*resource).asset as usize };
 
@@ -264,5 +259,5 @@ pub extern "C" fn manage_resource(resource: *mut grim::Resource) -> c_int {
             .retain(|hq_image| hq_image.original_image != asset);
     }
 
-    original(resource)
+    unsafe { grim::manage_resource(resource) }
 }

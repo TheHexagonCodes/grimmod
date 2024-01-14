@@ -39,13 +39,12 @@ pub fn find_modded(filename: &str) -> Option<PathBuf> {
 
 /// Enhances the game's open file function, opening modded files if found
 pub extern "C" fn open(raw_filename: *mut c_char, mode: *mut c_char) -> *mut c_void {
-    let original: grim::OpenFile = unsafe { std::mem::transmute(OPEN_FILE_HOOK.trampoline()) };
     let Ok(filename) = unsafe { CStr::from_ptr(raw_filename) }.to_str() else {
         return std::ptr::null_mut();
     };
 
     match find_modded(filename) {
-        None => original(raw_filename, mode),
+        None => unsafe { grim::open_file(raw_filename, mode) },
         Some(path) => {
             debug::info(format!("Opening modded file: {}", path.display()));
 
@@ -63,11 +62,10 @@ pub extern "C" fn open(raw_filename: *mut c_char, mode: *mut c_char) -> *mut c_v
 
 /// Closes original or modded files
 pub extern "C" fn close(file: *mut c_void) -> i32 {
-    let original: grim::CloseFile = unsafe { std::mem::transmute(CLOSE_FILE_HOOK.trampoline()) };
     let handle = file as usize;
     with_handles(|handles| {
         if !handles.contains(&handle) {
-            original(file)
+            unsafe { grim::close_file(file) }
         } else {
             handles.remove(&handle);
             unsafe { fclose(file) }
@@ -77,12 +75,11 @@ pub extern "C" fn close(file: *mut c_void) -> i32 {
 
 /// Reads from original or modded files
 pub extern "C" fn read(file: *mut c_void, dst: *mut c_void, size: usize) -> usize {
-    let original: grim::ReadFile = unsafe { std::mem::transmute(READ_FILE_HOOK.trampoline()) };
     let handle = file as usize;
     let modded = with_handles(|handles| handles.contains(&handle));
 
     if !modded {
-        original(file, dst, size)
+        unsafe { grim::read_file(file, dst, size) }
     } else {
         unsafe { fread(dst, 1, size, file) }
     }
