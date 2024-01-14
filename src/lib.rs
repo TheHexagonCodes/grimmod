@@ -4,6 +4,7 @@ mod debug;
 mod file;
 mod grim;
 mod image;
+mod misc;
 mod process;
 
 use std::ffi::c_void;
@@ -33,6 +34,11 @@ fn main() {
         grim::decompress_image.hook(image::decompress_image as grim::DecompressImage);
         grim::manage_resource.hook(image::manage_resource as grim::ManageResource);
     };
+
+    unsafe {
+        grim::sdl_gl_set_swap_interval
+            .hook(misc::sdl_gl_set_swap_interval as grim::SdlGlSetSwapInterval);
+    }
 }
 
 #[no_mangle]

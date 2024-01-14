@@ -2,7 +2,7 @@
 
 use std::ffi::{c_char, c_int, c_void, CStr};
 
-use crate::process::DirectFn;
+use crate::process::{DirectFn, IndirectFn};
 
 // file operation functions that work with LAB packed files
 pub static mut open_file: DirectFn<OpenFile> = DirectFn::new("open_file", 0x1EF80);
@@ -17,6 +17,10 @@ pub static mut decompress_image: DirectFn<DecompressImage> =
     DirectFn::new("decompress_image", 0x24D20);
 pub static mut manage_resource: DirectFn<ManageResource> =
     DirectFn::new("manage_resource", 0x2B340);
+
+// some library functions used
+pub static mut sdl_gl_set_swap_interval: IndirectFn<SdlGlSetSwapInterval> =
+    IndirectFn::new("sdl_gl_set_swap_interval", 0x17147C);
 
 pub mod address {
     use crate::process::relative_address as relative;
@@ -45,6 +49,8 @@ pub type CopyImage =
 pub type SurfaceUpload = extern "C" fn(*mut Surface, *mut c_void);
 pub type DecompressImage = extern "C" fn(*const Image);
 pub type ManageResource = extern "C" fn(*mut Resource) -> c_int;
+
+pub type SdlGlSetSwapInterval = extern "C" fn(c_int) -> c_int;
 
 /// Everything associated with a render pass (background, z-buffer, shadows, etc.)
 ///
