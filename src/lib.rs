@@ -1,3 +1,5 @@
+#![feature(fn_traits, let_chains, tuple_trait, unboxed_closures)]
+
 mod debug;
 mod file;
 mod grim;
