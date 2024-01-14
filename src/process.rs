@@ -36,10 +36,6 @@ pub fn relative_address(address: usize) -> usize {
     *BASE_ADDRESS + address
 }
 
-pub unsafe fn read<T: Sized + Copy>(address: usize) -> T {
-    *(address as *const T)
-}
-
 pub unsafe fn with_mut_ref<T, F: FnOnce(&mut T)>(address: usize, block: F) {
     let mut existing_flags: PAGE_PROTECTION_FLAGS = std::mem::zeroed();
 
