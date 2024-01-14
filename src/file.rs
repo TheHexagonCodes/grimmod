@@ -1,6 +1,5 @@
 use glob::glob;
 use lazy_static::lazy_static;
-use retour::RawDetour;
 use std::collections::HashSet;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::path::PathBuf;
@@ -14,15 +13,6 @@ use crate::grim;
 static HANDLES: Mutex<Option<HashSet<usize>>> = Mutex::new(None);
 
 lazy_static! {
-    pub static ref OPEN_FILE_HOOK: RawDetour = unsafe {
-        RawDetour::new(*grim::address::OPEN_FILE as *const (), open as *const ()).unwrap()
-    };
-    pub static ref CLOSE_FILE_HOOK: RawDetour = unsafe {
-        RawDetour::new(*grim::address::CLOSE_FILE as *const (), close as *const ()).unwrap()
-    };
-    pub static ref READ_FILE_HOOK: RawDetour = unsafe {
-        RawDetour::new(*grim::address::READ_FILE as *const (), read as *const ()).unwrap()
-    };
 }
 
 extern "C" {

@@ -1,5 +1,4 @@
 use lazy_static::lazy_static;
-use retour::RawDetour;
 use std::ffi::c_void;
 use std::ffi::{c_char, c_int, c_uint, CStr};
 use std::path::Path;
@@ -12,41 +11,6 @@ use crate::process;
 
 lazy_static! {
     pub static ref HQ_IMAGES: Mutex<Vec<HqImage>> = Mutex::new(Vec::new());
-    pub static ref OPEN_BM_IMAGE_HOOK: RawDetour = unsafe {
-        RawDetour::new(
-            *grim::address::OPEN_BM_IMAGE as *const (),
-            open_bm_image as *const (),
-        )
-        .unwrap()
-    };
-    pub static ref SURFACE_UPLOAD_HOOK: RawDetour = unsafe {
-        RawDetour::new(
-            *grim::address::SURFACE_UPLOAD as *const (),
-            surface_upload as *const (),
-        )
-        .unwrap()
-    };
-    pub static ref DECOMPRESS_IMAGE_HOOK: RawDetour = unsafe {
-        RawDetour::new(
-            *grim::address::DECOMPRESS_IMAGE as *const (),
-            decompress_image as *const (),
-        )
-        .unwrap()
-    };
-    pub static ref COPY_IMAGE_HOOK: RawDetour = unsafe {
-        RawDetour::new(
-            *grim::address::COPY_IMAGE as *const (),
-            copy_image as *const (),
-        )
-        .unwrap()
-    };
-    pub static ref MANAGE_RESOURCE_HOOK: RawDetour = unsafe {
-        RawDetour::new(
-            *grim::address::MANAGE_RESOURCE as *const (),
-            manage_resource as *const (),
-        )
-        .unwrap()
-    };
 }
 
 pub struct HqImage {

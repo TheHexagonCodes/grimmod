@@ -4,10 +4,12 @@ use std::ffi::{c_char, c_int, c_void, CStr};
 
 use crate::process::DirectFn;
 
+// file operation functions that work with LAB packed files
 pub static mut open_file: DirectFn<OpenFile> = DirectFn::new("open_file", 0x1EF80);
 pub static mut close_file: DirectFn<CloseFile> = DirectFn::new("close_file", 0x1C870);
 pub static mut read_file: DirectFn<ReadFile> = DirectFn::new("read_file", 0x1E050);
 
+// functions for loading images and preparing textures
 pub static mut open_bm_image: DirectFn<OpenBmImage> = DirectFn::new("open_bm_image", 0xDADE0);
 pub static mut surface_upload: DirectFn<SurfaceUpload> = DirectFn::new("surface_upload", 0xE8A80);
 pub static mut copy_image: DirectFn<CopyImage> = DirectFn::new("copy_image", 0xE5EC0);
@@ -21,18 +23,6 @@ pub mod address {
     use lazy_static::lazy_static;
 
     lazy_static! {
-        // file operation functions that work with LAB packed files
-        pub static ref OPEN_FILE: usize = relative(0x1EF80);
-        pub static ref CLOSE_FILE: usize = relative(0x1C870);
-        pub static ref READ_FILE: usize = relative(0x1E050);
-
-        // functions for loading images and preparing textures
-        pub static ref OPEN_BM_IMAGE: usize = relative(0xDADE0);
-        pub static ref SURFACE_UPLOAD: usize = relative(0xE8A80);
-        pub static ref COPY_IMAGE: usize = relative(0xE5EC0);
-        pub static ref DECOMPRESS_IMAGE: usize = relative(0x24D20);
-        pub static ref MANAGE_RESOURCE: usize = relative(0x2B340);
-
         // various buffers used for rendering textures
         pub static ref DECOMPRESSION_BUFFER_PTR: usize = relative(0x1691C78);
         pub static ref CLEAN_BUFFER_PTR: usize = relative(0x1691C7C);
