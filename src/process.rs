@@ -170,3 +170,79 @@ impl_direct_fn_traits!(A, B, C, D, E);
 impl_direct_fn_traits!(A, B, C, D, E, F);
 impl_direct_fn_traits!(A, B, C, D, E, F, G);
 impl_direct_fn_traits!(A, B, C, D, E, F, G, H);
+
+pub struct IndirectFn<F> {
+    pub name: &'static str,
+    pub relative_address: usize,
+    pub hooked: Option<usize>,
+    fn_type: PhantomData<F>,
+}
+
+impl<F> IndirectFn<F> {
+    pub const fn new(name: &'static str, relative_address: usize) -> IndirectFn<F> {
+        IndirectFn {
+            name,
+            relative_address,
+            hooked: None,
+            fn_type: PhantomData,
+        }
+    }
+
+    pub fn address(&self) -> usize {
+        relative_address(self.relative_address)
+    }
+
+    pub unsafe fn hook(&mut self, replacement: F) {
+        let replacement_addr = *(&replacement as *const F as *const usize);
+        self.hooked = Some(self.fn_addr());
+        write(self.address(), replacement_addr);
+    }
+
+    pub unsafe fn fn_addr(&self) -> usize {
+        if let Some(original_addr) = self.hooked {
+            original_addr
+        } else {
+            *(self.address() as *const usize)
+        }
+    }
+}
+
+macro_rules! impl_indirect_fn_traits {
+    ($($T:ident),*) => {
+        #[allow(non_snake_case)]
+        impl<$($T,)* R> FnOnce<($($T,)*)> for IndirectFn<extern "C" fn($($T,)*) -> R> {
+            type Output = R;
+
+            extern "rust-call" fn call_once(self, ($($T,)*): ($($T,)*)) -> R {
+                let f: extern "C" fn($($T,)*) -> R = unsafe { mem::transmute(self.fn_addr()) };
+                (f)($($T,)*)
+            }
+        }
+
+        #[allow(non_snake_case)]
+        impl<$($T, )* R> FnMut<($($T,)*)> for IndirectFn<extern "C" fn($($T,)*) -> R> {
+            extern "rust-call" fn call_mut(&mut self, ($($T,)*): ($($T,)*)) -> R {
+                let f: extern "C" fn($($T,)*) -> R = unsafe { mem::transmute(self.fn_addr()) };
+                (f)($($T,)*)
+            }
+        }
+
+        #[allow(non_snake_case)]
+        impl<$($T, )* R> Fn<($($T,)*)> for IndirectFn<extern "C" fn($($T,)*) -> R> {
+            extern "rust-call" fn call(&self, ($($T,)*): ($($T,)*)) -> R {
+                let f: extern "C" fn($($T,)*) -> R = unsafe { mem::transmute(self.fn_addr()) };
+                (f)($($T,)*)
+            }
+        }
+    };
+}
+
+impl_indirect_fn_traits!();
+impl_indirect_fn_traits!(A);
+impl_indirect_fn_traits!(A, B);
+impl_indirect_fn_traits!(A, B, C);
+impl_indirect_fn_traits!(A, B, C, D);
+impl_indirect_fn_traits!(A, B, C, D, E);
+impl_indirect_fn_traits!(A, B, C, D, E, F);
+impl_indirect_fn_traits!(A, B, C, D, E, F, G);
+impl_indirect_fn_traits!(A, B, C, D, E, F, G, H);
