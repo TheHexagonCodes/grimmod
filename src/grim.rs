@@ -1,5 +1,20 @@
+#![allow(non_upper_case_globals)]
+
 use std::ffi::{c_char, c_int, c_void, CStr};
 
+use crate::process::DirectFn;
+
+pub static mut open_file: DirectFn<OpenFile> = DirectFn::new("open_file", 0x1EF80);
+pub static mut close_file: DirectFn<CloseFile> = DirectFn::new("close_file", 0x1C870);
+pub static mut read_file: DirectFn<ReadFile> = DirectFn::new("read_file", 0x1E050);
+
+pub static mut open_bm_image: DirectFn<OpenBmImage> = DirectFn::new("open_bm_image", 0xDADE0);
+pub static mut surface_upload: DirectFn<SurfaceUpload> = DirectFn::new("surface_upload", 0xE8A80);
+pub static mut copy_image: DirectFn<CopyImage> = DirectFn::new("copy_image", 0xE5EC0);
+pub static mut decompress_image: DirectFn<DecompressImage> =
+    DirectFn::new("decompress_image", 0x24D20);
+pub static mut manage_resource: DirectFn<ManageResource> =
+    DirectFn::new("manage_resource", 0x2B340);
 
 pub mod address {
     use crate::process::relative_address as relative;
