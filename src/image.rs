@@ -28,18 +28,10 @@ pub struct HqImage {
 /// Return the address for the background render pass's surface
 fn bitmap_underlays_surface() -> usize {
     unsafe {
-        let render_pass =
-            *(*grim::address::BITMAP_UNDERLAYS_RENDER_PASS_PTR as *const *const grim::RenderPass);
-        if render_pass.is_null() {
-            return 0;
-        }
-        let render_pass_data = (*render_pass).data;
-        if render_pass_data.is_null() {
-            return 0;
-        }
-        let bitmap_underlays_surface = (*render_pass_data).surface;
-
-        bitmap_underlays_surface as usize
+        let render_pass = grim::BITMAP_UNDERLAYS_RENDER_PASS.inner_ref();
+        let render_pass_data = render_pass.and_then(|render_pass| render_pass.data.as_ref());
+        let surface = render_pass_data.map(|render_pass_data| render_pass_data.surface as usize);
+        surface.unwrap_or(0)
     }
 }
 
@@ -129,7 +121,7 @@ pub extern "C" fn copy_image(
     // detect an image with an associated hq image being copied to the clean buffer
     // either directly or from a recent decompression
     // an image being copied to the clean buffer means it is about to get rendered
-    if dst_image as usize == unsafe { *(*grim::address::CLEAN_BUFFER_PTR as *const usize) } {
+    if dst_image as usize == unsafe { grim::CLEAN_BUFFER.inner_addr() } {
         for hq_image in HQ_IMAGES.lock().unwrap().iter_mut() {
             hq_image.active =
                 hq_image.decompressing || hq_image.original_image == src_image as usize;

@@ -2,7 +2,7 @@
 
 use std::ffi::{c_char, c_int, c_uint, c_void, CStr};
 
-use crate::process::DirectFn;
+use crate::process::{DirectFn, Value};
 
 // file operation functions that work with LAB packed files
 pub static mut open_file: DirectFn<OpenFile> = DirectFn::new("open_file", 0x1EF80);
@@ -19,22 +19,11 @@ pub static mut manage_resource: DirectFn<ManageResource> =
     DirectFn::new("manage_resource", 0x2B340);
 pub static mut setup_draw: DirectFn<SetupDraw> = DirectFn::new("setup_draw", 0xF3540);
 
-pub mod address {
-    use crate::process::relative_address as relative;
-    use lazy_static::lazy_static;
-
-    lazy_static! {
-        // various buffers used for rendering textures
-        pub static ref DECOMPRESSION_BUFFER_PTR: usize = relative(0x1691C78);
-        pub static ref CLEAN_BUFFER_PTR: usize = relative(0x1691C7C);
-
-        // background render pass data
-        pub static ref BITMAP_UNDERLAYS_RENDER_PASS_PTR: usize = relative(0x30861E4);
-
-        // contains the address for the RuntimeContext in use by the game
-        pub static ref RUNTIME_CONTEXT_PTR: usize = relative(0x31B2CD8);
-    }
-}
+// backgrounds are copied into the clean buffer before rendering
+pub static mut CLEAN_BUFFER: Value<*const *const Image> = Value::new(0x1691C7C);
+// backgrounds' render pass data
+pub static mut BITMAP_UNDERLAYS_RENDER_PASS: Value<*const *const RenderPass> =
+    Value::new(0x30861E4);
 
 pub type OpenFile = extern "C" fn(*mut c_char, *mut c_char) -> *mut c_void;
 pub type CloseFile = extern "C" fn(*mut c_void) -> c_int;
