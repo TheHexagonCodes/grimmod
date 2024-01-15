@@ -92,14 +92,11 @@ pub extern "C" fn decompress_image(image: *const grim::Image) {
     // check for an image with an associated hq image getting decompressed
     // it will shortly be copied to the clean buffer and soon rendered
     for hq_image in HQ_IMAGES.lock().unwrap().iter_mut() {
-        unsafe {
-            process::with_mut_ref(
-                hq_image.original_image,
-                |image_container: &mut grim::ImageContainer| {
-                    hq_image.decompressing = *(image_container.images) as usize == image as usize;
-                },
-            );
-        }
+        let first_image = unsafe {
+            let original_image = process::as_ref::<grim::ImageContainer>(hq_image.original_image);
+            original_image.and_then(|container| container.images.as_ref())
+        };
+        hq_image.decompressing = first_image == Some(&image);
     }
 
     unsafe { grim::decompress_image(image) }
