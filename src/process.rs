@@ -36,6 +36,15 @@ pub fn relative_address(address: usize) -> usize {
     *BASE_ADDRESS + address
 }
 
+pub unsafe fn as_ref<'a, T: Sized>(address: usize) -> Option<&'a T> {
+    (address as *const T).as_ref()
+}
+
+pub unsafe fn read<T: Sized + Clone + Default>(address: usize) -> T {
+    let value_ref = as_ref(address);
+    value_ref.cloned().unwrap_or_default()
+}
+
 pub unsafe fn with_mut_ref<T, F: FnOnce(&mut T)>(address: usize, block: F) {
     let mut existing_flags: PAGE_PROTECTION_FLAGS = std::mem::zeroed();
 
@@ -262,3 +271,31 @@ impl_indirect_fn_traits!(A, B, C, D, E, F, G);
 impl_indirect_fn_traits!(A, B, C, D, E, F, G, H);
 impl_indirect_fn_traits!(A, B, C, D, E, F, G, H, I);
 impl_indirect_fn_traits!(A, B, C, D, E, F, G, H, I, J);
+
+pub struct Value<T> {
+    pub relative_address: usize,
+    value_type: PhantomData<T>,
+}
+
+impl<T> Value<T> {
+    pub const fn new(relative_address: usize) -> Value<T> {
+        Value {
+            relative_address,
+            value_type: PhantomData,
+        }
+    }
+
+    pub fn addr(&self) -> usize {
+        relative_address(self.relative_address)
+    }
+}
+
+impl<T> Value<*const *const T> {
+    pub unsafe fn inner_addr(&self) -> usize {
+        read::<usize>(self.addr())
+    }
+
+    pub unsafe fn inner_ref<'a>(&self) -> Option<&'a T> {
+        as_ref::<T>(self.inner_addr())
+    }
+}
