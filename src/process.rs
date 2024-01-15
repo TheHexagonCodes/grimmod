@@ -127,34 +127,42 @@ impl<F> DirectFn<F> {
     }
 }
 
-macro_rules! impl_direct_fn_traits {
-    ($($T:ident),*) => {
+macro_rules! impl_direct_extern_fn_traits {
+    ($conv:literal, $($T:ident),*) => {
         #[allow(non_snake_case)]
-        impl<$($T,)* R> FnOnce<($($T,)*)> for DirectFn<extern "C" fn($($T,)*) -> R> {
+        impl<$($T,)* R> FnOnce<($($T,)*)> for DirectFn<extern $conv fn($($T,)*) -> R> {
             type Output = R;
 
             extern "rust-call" fn call_once(self, ($($T,)*): ($($T,)*)) -> R {
-                let f: extern "C" fn($($T,)*) -> R = unsafe { mem::transmute(self.fn_addr()) };
+                let f: extern $conv fn($($T,)*) -> R = unsafe { mem::transmute(self.fn_addr()) };
                 (f)($($T,)*)
             }
         }
 
         #[allow(non_snake_case)]
-        impl<$($T, )* R> FnMut<($($T,)*)> for DirectFn<extern "C" fn($($T,)*) -> R> {
+        impl<$($T, )* R> FnMut<($($T,)*)> for DirectFn<extern $conv fn($($T,)*) -> R> {
             extern "rust-call" fn call_mut(&mut self, ($($T,)*): ($($T,)*)) -> R {
-                let f: extern "C" fn($($T,)*) -> R = unsafe { mem::transmute(self.fn_addr()) };
+                let f: extern $conv fn($($T,)*) -> R = unsafe { mem::transmute(self.fn_addr()) };
                 (f)($($T,)*)
             }
         }
 
         #[allow(non_snake_case)]
-        impl<$($T, )* R> Fn<($($T,)*)> for DirectFn<extern "C" fn($($T,)*) -> R> {
+        impl<$($T, )* R> Fn<($($T,)*)> for DirectFn<extern $conv fn($($T,)*) -> R> {
             extern "rust-call" fn call(&self, ($($T,)*): ($($T,)*)) -> R {
-                let f: extern "C" fn($($T,)*) -> R = unsafe { mem::transmute(self.fn_addr()) };
+                let f: extern $conv fn($($T,)*) -> R = unsafe { mem::transmute(self.fn_addr()) };
                 (f)($($T,)*)
             }
         }
     };
+}
+
+macro_rules! impl_direct_fn_traits {
+    ($($T:ident),*) => {
+        impl_direct_extern_fn_traits!("C", $($T),*);
+        impl_direct_extern_fn_traits!("stdcall", $($T),*);
+        impl_direct_extern_fn_traits!("fastcall", $($T),*);
+    }
 }
 
 impl_direct_fn_traits!();
@@ -203,34 +211,42 @@ impl<F> IndirectFn<F> {
     }
 }
 
-macro_rules! impl_indirect_fn_traits {
-    ($($T:ident),*) => {
+macro_rules! impl_indirect_extern_fn_traits {
+    ($conv:literal, $($T:ident),*) => {
         #[allow(non_snake_case)]
-        impl<$($T,)* R> FnOnce<($($T,)*)> for IndirectFn<extern "C" fn($($T,)*) -> R> {
+        impl<$($T,)* R> FnOnce<($($T,)*)> for IndirectFn<extern $conv fn($($T,)*) -> R> {
             type Output = R;
 
             extern "rust-call" fn call_once(self, ($($T,)*): ($($T,)*)) -> R {
-                let f: extern "C" fn($($T,)*) -> R = unsafe { mem::transmute(self.fn_addr()) };
+                let f: extern $conv fn($($T,)*) -> R = unsafe { mem::transmute(self.fn_addr()) };
                 (f)($($T,)*)
             }
         }
 
         #[allow(non_snake_case)]
-        impl<$($T, )* R> FnMut<($($T,)*)> for IndirectFn<extern "C" fn($($T,)*) -> R> {
+        impl<$($T, )* R> FnMut<($($T,)*)> for IndirectFn<extern $conv fn($($T,)*) -> R> {
             extern "rust-call" fn call_mut(&mut self, ($($T,)*): ($($T,)*)) -> R {
-                let f: extern "C" fn($($T,)*) -> R = unsafe { mem::transmute(self.fn_addr()) };
+                let f: extern $conv fn($($T,)*) -> R = unsafe { mem::transmute(self.fn_addr()) };
                 (f)($($T,)*)
             }
         }
 
         #[allow(non_snake_case)]
-        impl<$($T, )* R> Fn<($($T,)*)> for IndirectFn<extern "C" fn($($T,)*) -> R> {
+        impl<$($T, )* R> Fn<($($T,)*)> for IndirectFn<extern $conv fn($($T,)*) -> R> {
             extern "rust-call" fn call(&self, ($($T,)*): ($($T,)*)) -> R {
-                let f: extern "C" fn($($T,)*) -> R = unsafe { mem::transmute(self.fn_addr()) };
+                let f: extern $conv fn($($T,)*) -> R = unsafe { mem::transmute(self.fn_addr()) };
                 (f)($($T,)*)
             }
         }
     };
+}
+
+macro_rules! impl_indirect_fn_traits {
+    ($($T:ident),*) => {
+        impl_indirect_extern_fn_traits!("C", $($T),*);
+        impl_indirect_extern_fn_traits!("stdcall", $($T),*);
+        impl_indirect_extern_fn_traits!("fastcall", $($T),*);
+    }
 }
 
 impl_indirect_fn_traits!();
