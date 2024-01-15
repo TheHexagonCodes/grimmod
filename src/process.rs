@@ -174,6 +174,8 @@ impl_direct_fn_traits!(A, B, C, D, E);
 impl_direct_fn_traits!(A, B, C, D, E, F);
 impl_direct_fn_traits!(A, B, C, D, E, F, G);
 impl_direct_fn_traits!(A, B, C, D, E, F, G, H);
+impl_direct_fn_traits!(A, B, C, D, E, F, G, H, I);
+impl_direct_fn_traits!(A, B, C, D, E, F, G, H, I, J);
 
 pub struct IndirectFn<F> {
     pub name: &'static str,
@@ -258,3 +260,5 @@ impl_indirect_fn_traits!(A, B, C, D, E);
 impl_indirect_fn_traits!(A, B, C, D, E, F);
 impl_indirect_fn_traits!(A, B, C, D, E, F, G);
 impl_indirect_fn_traits!(A, B, C, D, E, F, G, H);
+impl_indirect_fn_traits!(A, B, C, D, E, F, G, H, I);
+impl_indirect_fn_traits!(A, B, C, D, E, F, G, H, I, J);
