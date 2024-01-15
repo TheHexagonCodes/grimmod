@@ -151,24 +151,6 @@ pub extern "C" fn copy_image(
     }
 }
 
-extern "stdcall" {
-    pub fn glTexImage2D(
-        target: c_uint,
-        level: c_int,
-        internalformat: c_int,
-        width: c_int,
-        height: c_int,
-        border: c_int,
-        format: c_uint,
-        typ: c_uint,
-        data: *const c_void,
-    );
-
-    pub fn glBindTexture(target: c_uint, texture: c_uint);
-
-    pub fn glPixelStorei(pname: c_uint, param: c_int);
-}
-
 /// Prepare a surface (aka texture) for uploading to the GPU or upload it now
 ///
 /// This is a overload for a native function that will be hooked
@@ -192,21 +174,24 @@ pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c
             surface as usize, image_data as usize
         ));
 
+        let texture_id = unsafe { surface.as_ref() }
+            .map(|surface| surface.texture_id)
+            .unwrap_or(0);
         let hq_image_data: *const [u8] = hq_image.buffer.as_ref();
 
         unsafe {
-            glPixelStorei(0xCF5, 1);
-            glBindTexture(0xDE1, (*surface).texture_id);
-            glPixelStorei(0xCF2, hq_image.width as i32);
-            glTexImage2D(
-                0xDE1,
+            gl::pixel_storei(gl::UNPACK_ALIGNMENT, 1);
+            gl::bind_texture(gl::TEXTURE_2D, texture_id);
+            gl::pixel_storei(gl::UNPACK_ROW_LENGTH, hq_image.width as gl::Int);
+            gl::tex_image_2d(
+                gl::TEXTURE_2D,
                 0,
-                0x1907,
-                hq_image.width as i32,
-                hq_image.height as i32,
+                gl::RGB as gl::Int,
+                hq_image.width as gl::Int,
+                hq_image.height as gl::Int,
                 0,
-                0x1907,
-                0x1401,
+                gl::RGB,
+                gl::UNSIGNED_BYTE,
                 hq_image_data as *const c_void,
             );
         }
