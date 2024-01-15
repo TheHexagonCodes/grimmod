@@ -2,10 +2,11 @@ use lazy_static::lazy_static;
 use std::ffi::c_void;
 use std::ffi::{c_char, c_int, c_uint, CStr};
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 use crate::debug;
 use crate::file;
+use crate::gl;
 use crate::grim;
 use crate::process;
 
@@ -88,6 +89,10 @@ fn open_hq_image(filename: &str, image_container_addr: usize) -> Option<HqImage>
     })
 }
 
+fn active_hq_image<'a>(hq_images: &'a MutexGuard<'a, Vec<HqImage>>) -> Option<&'a HqImage> {
+    hq_images.iter().find(|hq_image| hq_image.active)
+}
+
 /// Decompresses an image into the global decompression buffer
 ///
 /// This is a overload for a native function that will be hooked
@@ -165,6 +170,8 @@ extern "stdcall" {
 }
 
 /// Prepare a surface (aka texture) for uploading to the GPU or upload it now
+///
+/// This is a overload for a native function that will be hooked
 pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c_void) {
     unsafe {
         // call with null to reset the buffer size as it might have been changed by a hq image
@@ -179,11 +186,7 @@ pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c
     }
 
     // check if any hq image is "active", if it is attach it as the background
-    for hq_image in HQ_IMAGES.lock().unwrap().iter() {
-        if !hq_image.active {
-            continue;
-        }
-
+    if let Some(hq_image) = active_hq_image(&HQ_IMAGES.lock().unwrap()) {
         debug::info(format!(
             "Surface Address: 0x{:x}, Image Data: 0x{:x}",
             surface as usize, image_data as usize
@@ -207,8 +210,6 @@ pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c
                 hq_image_data as *const c_void,
             );
         }
-
-        break;
     }
 }
 
@@ -224,4 +225,25 @@ pub extern "C" fn manage_resource(resource: *mut grim::Resource) -> c_int {
     }
 
     unsafe { grim::manage_resource(resource) }
+}
+
+/// Sets the OpenGL state for the next draw call
+///
+/// This is a overload for a native function that will be hooked
+pub extern "C" fn setup_draw(draw: *const grim::Draw, index_buffer: *const c_void) {
+    unsafe {
+        grim::setup_draw(draw, index_buffer);
+
+        // if a hq image is being rendered, use a linear texture filter for better quality
+        let surface = draw.as_ref().map(|draw| draw.surfaces[0] as usize);
+        let sampler = draw.as_ref().map(|draw| draw.samplers[0] as c_uint);
+        if let (Some(surface), Some(sampler)) = (surface, sampler) {
+            if surface == bitmap_underlays_surface()
+                && active_hq_image(&HQ_IMAGES.lock().unwrap()).is_some()
+            {
+                gl::sampler_parameteri(sampler, gl::TEXTURE_MIN_FILTER, gl::LINEAR as gl::Int);
+                gl::sampler_parameteri(sampler, gl::TEXTURE_MAG_FILTER, gl::LINEAR as gl::Int);
+            }
+        }
+    }
 }

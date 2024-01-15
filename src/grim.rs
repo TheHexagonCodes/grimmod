@@ -1,8 +1,8 @@
 #![allow(non_upper_case_globals)]
 
-use std::ffi::{c_char, c_int, c_void, CStr};
+use std::ffi::{c_char, c_int, c_uint, c_void, CStr};
 
-use crate::process::{DirectFn, IndirectFn};
+use crate::process::DirectFn;
 
 // file operation functions that work with LAB packed files
 pub static mut open_file: DirectFn<OpenFile> = DirectFn::new("open_file", 0x1EF80);
@@ -17,10 +17,7 @@ pub static mut decompress_image: DirectFn<DecompressImage> =
     DirectFn::new("decompress_image", 0x24D20);
 pub static mut manage_resource: DirectFn<ManageResource> =
     DirectFn::new("manage_resource", 0x2B340);
-
-// some library functions used
-pub static mut sdl_gl_set_swap_interval: IndirectFn<SdlGlSetSwapInterval> =
-    IndirectFn::new("sdl_gl_set_swap_interval", 0x17147C);
+pub static mut setup_draw: DirectFn<SetupDraw> = DirectFn::new("setup_draw", 0xF3540);
 
 pub mod address {
     use crate::process::relative_address as relative;
@@ -49,8 +46,7 @@ pub type CopyImage =
 pub type SurfaceUpload = extern "C" fn(*mut Surface, *mut c_void);
 pub type DecompressImage = extern "C" fn(*const Image);
 pub type ManageResource = extern "C" fn(*mut Resource) -> c_int;
-
-pub type SdlGlSetSwapInterval = extern "C" fn(c_int) -> c_int;
+pub type SetupDraw = extern "C" fn(*const Draw, *const c_void);
 
 /// Everything associated with a render pass (background, z-buffer, shadows, etc.)
 ///
@@ -87,6 +83,27 @@ pub struct RenderPassData {
 
     pub field_13: u32,
     pub surface: *const Surface,
+}
+
+/// Data used to setup the next draw call
+///
+/// The actual structure is much larger but it's not needed yet
+#[repr(C)]
+pub struct Draw {
+    pub field_1: u32,
+    pub field_2: u32,
+    pub render_target: *const c_void,
+    pub depth_drawbuffer: c_int,
+
+    pub fields_4_10: [u32; 6],
+
+    pub framebuffer: c_uint,
+    pub samplers: [c_uint; 8],
+    pub shader_pipeline: *const c_void,
+
+    pub fields_14_21: [u32; 7],
+
+    pub surfaces: [*const Surface; 8],
 }
 
 /// Common image attributes extracted to struct

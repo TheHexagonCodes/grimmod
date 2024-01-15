@@ -2,6 +2,7 @@
 
 mod debug;
 mod file;
+mod gl;
 mod grim;
 mod image;
 mod misc;
@@ -33,11 +34,11 @@ fn main() {
         grim::copy_image.hook(image::copy_image as grim::CopyImage);
         grim::decompress_image.hook(image::decompress_image as grim::DecompressImage);
         grim::manage_resource.hook(image::manage_resource as grim::ManageResource);
+        grim::setup_draw.hook(image::setup_draw as grim::SetupDraw);
     };
 
     unsafe {
-        grim::sdl_gl_set_swap_interval
-            .hook(misc::sdl_gl_set_swap_interval as grim::SdlGlSetSwapInterval);
+        gl::sdl_set_swap_interval.hook(misc::sdl_gl_set_swap_interval as gl::SdlSetSwapInterval);
     }
 }
 
