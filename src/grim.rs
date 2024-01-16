@@ -2,12 +2,14 @@
 
 use std::ffi::{c_char, c_int, c_uint, c_void, CStr};
 
+use crate::gl;
 use crate::process::{DirectFn, Value};
 
 // file operation functions that work with LAB packed files
 pub static mut open_file: DirectFn<OpenFile> = DirectFn::new("open_file", 0x1EF80);
 pub static mut close_file: DirectFn<CloseFile> = DirectFn::new("close_file", 0x1C870);
 pub static mut read_file: DirectFn<ReadFile> = DirectFn::new("read_file", 0x1E050);
+pub static mut read_all: DirectFn<ReadAll> = DirectFn::new("read_all", 0xE6700);
 
 // functions for loading images and preparing textures
 pub static mut open_bm_image: DirectFn<OpenBmImage> = DirectFn::new("open_bm_image", 0xDADE0);
@@ -18,6 +20,7 @@ pub static mut decompress_image: DirectFn<DecompressImage> =
 pub static mut manage_resource: DirectFn<ManageResource> =
     DirectFn::new("manage_resource", 0x2B340);
 pub static mut setup_draw: DirectFn<SetupDraw> = DirectFn::new("setup_draw", 0xF3540);
+pub static mut compile_shader: DirectFn<CompileShader> = DirectFn::new("compile_shader", 0xF2000);
 
 // backgrounds are copied into the clean buffer before rendering
 pub static mut CLEAN_BUFFER: Value<*const *const Image> = Value::new(0x1691C7C);
@@ -28,6 +31,8 @@ pub static mut BITMAP_UNDERLAYS_RENDER_PASS: Value<*const *const RenderPass> =
 pub type OpenFile = extern "C" fn(*mut c_char, *mut c_char) -> *mut c_void;
 pub type CloseFile = extern "C" fn(*mut c_void) -> c_int;
 pub type ReadFile = extern "C" fn(*mut c_void, *mut c_void, usize) -> usize;
+pub type ReadAll =
+    extern "C" fn(dst: *mut *const c_void, size: *mut usize, filename: *const c_char);
 
 pub type OpenBmImage = extern "C" fn(*const c_char, u32, u32) -> *mut ImageContainer;
 pub type CopyImage =
@@ -35,7 +40,8 @@ pub type CopyImage =
 pub type SurfaceUpload = extern "C" fn(*mut Surface, *mut c_void);
 pub type DecompressImage = extern "C" fn(*const Image);
 pub type ManageResource = extern "C" fn(*mut Resource) -> c_int;
-pub type SetupDraw = extern "C" fn(*const Draw, *const c_void);
+pub type SetupDraw = extern "C" fn(*mut Draw, *const c_void);
+pub type CompileShader = extern "C" fn(name: *const c_char) -> *const Shader;
 
 /// Everything associated with a render pass (background, z-buffer, shadows, etc.)
 ///
@@ -88,11 +94,26 @@ pub struct Draw {
 
     pub framebuffer: c_uint,
     pub samplers: [c_uint; 8],
-    pub shader_pipeline: *const c_void,
+    pub shader: *const Shader,
 
     pub fields_14_21: [u32; 7],
 
     pub surfaces: [*const Surface; 8],
+}
+
+/// A compiled shader program with vertex and fragment shaders attached
+#[repr(C)]
+pub struct Shader {
+    pub name: [c_char; 512],
+    pub vertex_shader: gl::Uint,
+    pub fragment_shader: gl::Uint,
+    pub program: gl::Uint,
+    pub fragment_constants_index: gl::Uint,
+    pub vertex_constants_index: gl::Uint,
+    pub param_7: u32,
+    pub param_8: *const c_void,
+    pub param_9: u32,
+    pub param_10: u32,
 }
 
 /// Common image attributes extracted to struct

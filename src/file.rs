@@ -7,6 +7,7 @@ use std::sync::Mutex;
 
 use crate::debug;
 use crate::grim;
+use crate::image;
 
 lazy_static! {
     // The game guards the file handle list with a mutex so that is replicated here out of caution.
@@ -69,5 +70,34 @@ pub extern "C" fn read(file: *mut c_void, dst: *mut c_void, size: usize) -> usiz
         unsafe { grim::read_file(file, dst, size) }
     } else {
         unsafe { fread(dst, 1, size, file) }
+    }
+}
+
+/// Opens a file and reads its entire contents
+///
+/// This is a overload for a native function that will be hooked
+pub extern "C" fn read_all(dst: *mut *const c_void, size: *mut usize, raw_filename: *const c_char) {
+    let filename = unsafe { CStr::from_ptr(raw_filename) }
+        .to_str()
+        .unwrap_or("");
+
+    if filename.starts_with("x86/shaders/compiled/grimmod_background") {
+        let mut shader = if filename.ends_with("v.glsl") {
+            image::BACKGROUND_V_SHADER.as_bytes().to_vec()
+        } else {
+            image::BACKGROUND_P_SHADER.as_bytes().to_vec()
+        };
+        shader.push(0);
+
+        unsafe {
+            if let (Some(dst), Some(size)) = (dst.as_mut(), size.as_mut()) {
+                *dst = shader.as_ptr() as *const c_void;
+                *size = shader.len();
+            };
+        }
+
+        std::mem::forget(shader);
+    } else {
+        unsafe { grim::read_all(dst, size, raw_filename) }
     }
 }

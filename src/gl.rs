@@ -7,6 +7,8 @@ use crate::process::IndirectFn;
 pub static mut bind_texture: IndirectFn<BindTexture> = IndirectFn::new("gl_bind_texture", 0x1713E8);
 pub static mut tex_image_2d: IndirectFn<TexImage2D> = IndirectFn::new("gl_text_image_2d", 0x1713E0);
 
+// pub static mut use_program: IndirectFn<UseProgram> = IndirectFn::new("gl_use_program", 0x2E837E4);
+
 pub static mut pixel_storei: IndirectFn<PixelStorei> = IndirectFn::new("gl_pixel_storei", 0x1713EC);
 pub static mut sampler_parameteri: IndirectFn<SamplerParameteri> =
     IndirectFn::new("gl_sampler_parameteri", 0x2E84064);
@@ -31,6 +33,8 @@ pub type TexImage2D = extern "stdcall" fn(
     typ: Enum,
     data: *const c_void,
 );
+
+// pub type UseProgram = extern "stdcall" fn(program: Uint);
 
 pub type PixelStorei = extern "stdcall" fn(pname: Enum, param: Int);
 pub type SamplerParameteri = extern "stdcall" fn(sampler: Uint, pname: Enum, param: Int);

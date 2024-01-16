@@ -1,6 +1,6 @@
 use lazy_static::lazy_static;
 use std::ffi::c_void;
-use std::ffi::{c_char, c_int, c_uint, CStr};
+use std::ffi::{c_char, c_int, c_uint, CStr, CString};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
@@ -12,6 +12,7 @@ use crate::process;
 
 lazy_static! {
     pub static ref HQ_IMAGES: Mutex<Vec<HqImage>> = Mutex::new(Vec::new());
+    pub static ref BACKGROUND_SHADER: usize = compile_background_shader() as usize;
 }
 
 pub struct HqImage {
@@ -201,23 +202,66 @@ pub extern "C" fn manage_resource(resource: *mut grim::Resource) -> c_int {
     unsafe { grim::manage_resource(resource) }
 }
 
+fn drawing_hq_background(draw: *const grim::Draw) -> bool {
+    let Some(surface) = unsafe { draw.as_ref() }.map(|draw| draw.surfaces[0] as usize) else {
+        return false;
+    };
+    surface == bitmap_underlays_surface() && active_hq_image(&HQ_IMAGES.lock().unwrap()).is_some()
+}
+
 /// Sets the OpenGL state for the next draw call
 ///
 /// This is a overload for a native function that will be hooked
-pub extern "C" fn setup_draw(draw: *const grim::Draw, index_buffer: *const c_void) {
+pub extern "C" fn setup_draw(draw: *mut grim::Draw, index_buffer: *const c_void) {
+    let hq = drawing_hq_background(draw);
+
+    // for hq backgrounds, use a custom shader that keeps the full resolution
+    if hq && let Some(draw) = unsafe { draw.as_mut() } {
+        draw.shader = *BACKGROUND_SHADER as *const grim::Shader;
+    }
+
     unsafe {
         grim::setup_draw(draw, index_buffer);
 
-        // if a hq image is being rendered, use a linear texture filter for better quality
-        let surface = draw.as_ref().map(|draw| draw.surfaces[0] as usize);
+        // for hq backgrounds, use a linear texture filter for better quality
         let sampler = draw.as_ref().map(|draw| draw.samplers[0] as c_uint);
-        if let (Some(surface), Some(sampler)) = (surface, sampler) {
-            if surface == bitmap_underlays_surface()
-                && active_hq_image(&HQ_IMAGES.lock().unwrap()).is_some()
-            {
-                gl::sampler_parameteri(sampler, gl::TEXTURE_MIN_FILTER, gl::LINEAR as gl::Int);
-                gl::sampler_parameteri(sampler, gl::TEXTURE_MAG_FILTER, gl::LINEAR as gl::Int);
-            }
+        if hq && let Some(sampler) = sampler {
+            gl::sampler_parameteri(sampler, gl::TEXTURE_MIN_FILTER, gl::LINEAR as gl::Int);
+            gl::sampler_parameteri(sampler, gl::TEXTURE_MAG_FILTER, gl::LINEAR as gl::Int);
         }
     }
 }
+
+pub fn compile_background_shader() -> *const grim::Shader {
+    let name = CString::new("grimmod_background").unwrap();
+    unsafe { grim::compile_shader(name.as_ptr()) }
+}
+
+pub static BACKGROUND_V_SHADER: &str = r#"
+    #version 330
+    layout(std140) uniform VSConstants {
+         vec4    MultiplyColor;     vec4    TexelSizeDesaturateGamma;     vec4    ColorKey;
+    } constantsV;
+    in vec3 vs_Position;
+    in vec2 vs_TexCoord;
+    out vec2 ps_TexCoordPx;
+    void main ()
+    {
+      gl_Position = vec4(vs_Position, 1.0);
+      ps_TexCoordPx = vs_TexCoord;
+    }
+"#;
+
+pub static BACKGROUND_P_SHADER: &str = r#"
+    #version 330
+    layout(std140) uniform PSConstants {
+         vec4    MultiplyColor;     vec4    TexelSizeDesaturateGamma;     vec4    ColorKey;
+    } constantsP;
+    uniform sampler2D ps_Texture0;
+    in vec2 ps_TexCoordPx;
+    out vec4 ps_Result;
+    void main ()
+    {
+      ps_Result = texture(ps_Texture0, ps_TexCoordPx);
+    }
+"#;
