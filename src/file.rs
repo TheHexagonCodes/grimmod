@@ -75,7 +75,7 @@ pub extern "C" fn read(file: *mut c_void, dst: *mut c_void, size: usize) -> usiz
 
 /// Opens a file and reads its entire contents
 ///
-/// This is a overload for a native function that will be hooked
+/// This is an overload for a native function that will be hooked
 pub extern "C" fn read_all(dst: *mut *const c_void, size: *mut usize, raw_filename: *const c_char) {
     let filename = unsafe { CStr::from_ptr(raw_filename) }
         .to_str()

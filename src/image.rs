@@ -38,7 +38,7 @@ fn bitmap_underlays_surface() -> usize {
 
 /// Loads the contents of a BM file into an image container
 ///
-/// This is a overload for a native function that will be hooked
+/// This is an overload for a native function that will be hooked
 pub extern "C" fn open_bm_image(
     raw_filename: *const c_char,
     param_2: u32,
@@ -88,7 +88,7 @@ fn active_hq_image<'a>(hq_images: &'a MutexGuard<'a, Vec<HqImage>>) -> Option<&'
 
 /// Decompresses an image into the global decompression buffer
 ///
-/// This is a overload for a native function that will be hooked
+/// This is an overload for a native function that will be hooked
 pub extern "C" fn decompress_image(image: *const grim::Image) {
     // check for an image with an associated hq image getting decompressed
     // it will shortly be copied to the clean buffer and soon rendered
@@ -105,7 +105,7 @@ pub extern "C" fn decompress_image(image: *const grim::Image) {
 
 /// Copy an image and surface from a source to a pre-allocated destination
 ///
-/// This is a overload for a native function that will be hooked
+/// This is an overload for a native function that will be hooked
 pub extern "C" fn copy_image(
     dst_image: *mut grim::Image,
     dst_surface: *mut c_void,
@@ -143,7 +143,7 @@ pub extern "C" fn copy_image(
 
 /// Prepare a surface (aka texture) for uploading to the GPU or upload it now
 ///
-/// This is a overload for a native function that will be hooked
+/// This is an overload for a native function that will be hooked
 pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c_void) {
     unsafe {
         // call with null to reset the buffer size as it might have been changed by a hq image
@@ -211,7 +211,7 @@ fn drawing_hq_background(draw: *const grim::Draw) -> bool {
 
 /// Sets the OpenGL state for the next draw call
 ///
-/// This is a overload for a native function that will be hooked
+/// This is an overload for a native function that will be hooked
 pub extern "C" fn setup_draw(draw: *mut grim::Draw, index_buffer: *const c_void) {
     let hq = drawing_hq_background(draw);
 
