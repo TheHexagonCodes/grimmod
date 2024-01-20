@@ -1,7 +1,7 @@
 use lazy_static::lazy_static;
 use std::ffi::c_void;
 use std::ffi::{c_char, c_int, c_uint, CStr, CString};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
 use crate::debug;
@@ -10,7 +10,7 @@ use crate::gl;
 use crate::grim;
 
 pub static DECOMPRESSED: Mutex<usize> = Mutex::new(0);
-pub static BACKGROUND: Mutex<Option<HqImageContainer>> = Mutex::new(None);
+pub static BACKGROUND: Mutex<Option<HqImage>> = Mutex::new(None);
 
 lazy_static! {
     pub static ref HQ_IMAGES: Mutex<Vec<HqImageContainer>> = Mutex::new(Vec::new());
@@ -19,12 +19,82 @@ lazy_static! {
 
 #[derive(Clone)]
 pub struct HqImageContainer {
-    pub path: String,
     pub name: String,
+    pub original_addr: usize,
+    pub images: Vec<HqImage>,
+}
+
+#[derive(Clone)]
+pub struct HqImage {
     pub width: u32,
     pub height: u32,
-    pub buffer: Vec<u8>,
+    pub path: String,
     pub original_addr: usize,
+    pub buffer: Vec<u8>,
+}
+
+impl HqImageContainer {
+    unsafe fn from_raw(
+        raw_image_container: *const grim::ImageContainer,
+    ) -> Option<HqImageContainer> {
+        let image_container = raw_image_container.as_ref()?;
+        let name = image_container.name.as_ptr();
+        let image_refs = std::slice::from_raw_parts(image_container.images, 1);
+        let filename = CStr::from_ptr(name).to_str().ok()?;
+        HqImageContainer::open(filename, image_container, image_refs[0].as_ref()?)
+    }
+
+    fn open(
+        bm_filename: &str,
+        image_container: &grim::ImageContainer,
+        image: &grim::Image,
+    ) -> Option<HqImageContainer> {
+        let name = Path::new(bm_filename).file_stem()?.to_str()?;
+        let image_path = HqImage::find_modded_path(name)?;
+        let hq_image = HqImage::open_all(name, image_path, image)?;
+
+        Some(HqImageContainer {
+            name: name.to_string(),
+            original_addr: image_container as *const _ as usize,
+            images: vec![hq_image],
+        })
+    }
+}
+
+impl HqImage {
+    fn open_all(name: &str, path: PathBuf, image: &grim::Image) -> Option<HqImage> {
+        let png = match image::open(&path) {
+            Ok(pngs) => Some(pngs),
+            Err(error) => {
+                debug::error(format!("Could not open {} image: {}", name, error));
+                None
+            }
+        }?;
+
+        Some(HqImage {
+            width: png.width(),
+            height: png.height(),
+            path: path.display().to_string(),
+            original_addr: image as *const _ as usize,
+            buffer: png.to_rgb8().into_vec(),
+        })
+    }
+
+    fn find_modded_path(name: &str) -> Option<PathBuf> {
+        file::find_modded(&format!("{}.png", name))
+    }
+
+    fn find_loaded<'a>(
+        original_addr: usize,
+        hq_images: &'a MutexGuard<'a, Vec<HqImageContainer>>,
+    ) -> Option<&'a HqImage> {
+        hq_images.iter().find_map(|hq_image_container| {
+            hq_image_container
+                .images
+                .iter()
+                .find(|hq_image| hq_image.original_addr == original_addr)
+        })
+    }
 }
 
 /// Return the address for the background render pass's surface
@@ -45,57 +115,15 @@ pub extern "C" fn open_bm_image(
     param_2: u32,
     param_3: u32,
 ) -> *mut grim::ImageContainer {
-    let image_container_raw = unsafe { grim::open_bm_image(raw_filename, param_2, param_3) };
-    let image_container_addr = image_container_raw as usize;
-    let Some(image_container) = (unsafe { image_container_raw.as_ref() }) else {
-        return image_container_raw;
-    };
+    unsafe {
+        let image_container = grim::open_bm_image(raw_filename, param_2, param_3);
 
-    if let Ok(filename) = unsafe { CStr::from_ptr(raw_filename) }.to_str() {
-        debug::info(format!("Opening BM: {}", filename));
-
-        let images = unsafe { std::slice::from_raw_parts(image_container.images, 1) };
-        if let Some(hq_image) = open_hq_image(filename, images[0] as usize) {
-            HQ_IMAGES.lock().unwrap().push(hq_image);
+        if let Some(hq_image_container) = HqImageContainer::from_raw(image_container) {
+            HQ_IMAGES.lock().unwrap().push(hq_image_container);
         }
-    };
 
-    image_container_raw
-}
-
-fn open_hq_image(filename: &str, original_addr: usize) -> Option<HqImageContainer> {
-    if !filename.ends_with(".bm") && !filename.ends_with(".BM") {
-        return None;
+        image_container
     }
-
-    let file_stem = Path::new(filename).file_stem()?.to_str()?;
-    let modded_filename = format!("{}.png", file_stem);
-    let modded_path = file::find_modded(modded_filename.as_str())?;
-
-    debug::info(format!("Opening HQ Image: {}", modded_path.display()));
-
-    let image = image::open(modded_path).ok()?;
-
-    Some(HqImageContainer {
-        name: filename.to_lowercase(),
-        path: modded_filename,
-        width: image.width(),
-        height: image.height(),
-        buffer: image.to_rgb8().into_vec(),
-        original_addr,
-        original_image: image_container_addr,
-    })
-}
-
-fn find_hq_image<'a>(
-    hq_images: &'a MutexGuard<'a, Vec<HqImageContainer>>,
-    original_addr: usize,
-) -> Option<&'a HqImageContainer> {
-    hq_images
-        .iter()
-        .find(|hq_image| hq_image.original_addr == original_addr)
-}
-
 }
 
 /// Decompresses an image into the global decompression buffer
@@ -127,14 +155,15 @@ pub extern "C" fn copy_image(
     // an image being copied to the clean buffer means it is about to get rendered
     if dst_image as usize == unsafe { grim::CLEAN_BUFFER.inner_addr() } {
         let mut decompressed = DECOMPRESSED.lock().unwrap();
-
-        let hq_images = HQ_IMAGES.lock().unwrap();
-        *BACKGROUND.lock().unwrap() = find_hq_image(&hq_images, image_addr).cloned();
         let image_addr = if *decompressed != 0 {
             *decompressed
         } else {
             src_image as usize
         };
+
+        let hq_images = HQ_IMAGES.lock().unwrap();
+        let hq_image = HqImage::find_loaded(image_addr, &hq_images);
+        *BACKGROUND.lock().unwrap() = hq_image.cloned();
 
         *decompressed = 0;
     }
