@@ -8,22 +8,23 @@ use crate::debug;
 use crate::file;
 use crate::gl;
 use crate::grim;
-use crate::process;
+
+pub static DECOMPRESSED: Mutex<usize> = Mutex::new(0);
+pub static BACKGROUND: Mutex<Option<HqImage>> = Mutex::new(None);
 
 lazy_static! {
     pub static ref HQ_IMAGES: Mutex<Vec<HqImage>> = Mutex::new(Vec::new());
     pub static ref BACKGROUND_SHADER: usize = compile_background_shader() as usize;
 }
 
+#[derive(Clone)]
 pub struct HqImage {
     pub path: String,
     pub name: String,
     pub width: u32,
     pub height: u32,
     pub buffer: Vec<u8>,
-    pub original_image: usize,
-    pub active: bool,
-    pub decompressing: bool,
+    pub original_addr: usize,
 }
 
 /// Return the address for the background render pass's surface
@@ -44,20 +45,25 @@ pub extern "C" fn open_bm_image(
     param_2: u32,
     param_3: u32,
 ) -> *mut grim::ImageContainer {
-    let image_container = unsafe { grim::open_bm_image(raw_filename, param_2, param_3) };
+    let image_container_raw = unsafe { grim::open_bm_image(raw_filename, param_2, param_3) };
+    let image_container_addr = image_container_raw as usize;
+    let Some(image_container) = (unsafe { image_container_raw.as_ref() }) else {
+        return image_container_raw;
+    };
 
     if let Ok(filename) = unsafe { CStr::from_ptr(raw_filename) }.to_str() {
         debug::info(format!("Opening BM: {}", filename));
 
-        if let Some(hq_image) = open_hq_image(filename, image_container as usize) {
+        let images = unsafe { std::slice::from_raw_parts(image_container.images, 1) };
+        if let Some(hq_image) = open_hq_image(filename, images[0] as usize) {
             HQ_IMAGES.lock().unwrap().push(hq_image);
         }
     };
 
-    image_container
+    image_container_raw
 }
 
-fn open_hq_image(filename: &str, image_container_addr: usize) -> Option<HqImage> {
+fn open_hq_image(filename: &str, original_addr: usize) -> Option<HqImage> {
     if !filename.ends_with(".bm") && !filename.ends_with(".BM") {
         return None;
     }
@@ -76,29 +82,29 @@ fn open_hq_image(filename: &str, image_container_addr: usize) -> Option<HqImage>
         width: image.width(),
         height: image.height(),
         buffer: image.to_rgb8().into_vec(),
+        original_addr,
         original_image: image_container_addr,
-        active: false,
-        decompressing: false,
     })
 }
 
-fn active_hq_image<'a>(hq_images: &'a MutexGuard<'a, Vec<HqImage>>) -> Option<&'a HqImage> {
-    hq_images.iter().find(|hq_image| hq_image.active)
+fn find_hq_image<'a>(
+    hq_images: &'a MutexGuard<'a, Vec<HqImage>>,
+    original_addr: usize,
+) -> Option<&'a HqImage> {
+    hq_images
+        .iter()
+        .find(|hq_image| hq_image.original_addr == original_addr)
+}
+
 }
 
 /// Decompresses an image into the global decompression buffer
 ///
 /// This is an overload for a native function that will be hooked
 pub extern "C" fn decompress_image(image: *const grim::Image) {
-    // check for an image with an associated hq image getting decompressed
-    // it will shortly be copied to the clean buffer and soon rendered
-    for hq_image in HQ_IMAGES.lock().unwrap().iter_mut() {
-        let first_image = unsafe {
-            let original_image = process::as_ref::<grim::ImageContainer>(hq_image.original_image);
-            original_image.and_then(|container| container.images.as_ref())
-        };
-        hq_image.decompressing = first_image == Some(&image);
-    }
+    // store the address of the last image decompressed
+    // it will shortly be copied to the clean buffer and rendered
+    *DECOMPRESSED.lock().unwrap() = image as usize;
 
     unsafe { grim::decompress_image(image) }
 }
@@ -120,11 +126,17 @@ pub extern "C" fn copy_image(
     // either directly or from a recent decompression
     // an image being copied to the clean buffer means it is about to get rendered
     if dst_image as usize == unsafe { grim::CLEAN_BUFFER.inner_addr() } {
-        for hq_image in HQ_IMAGES.lock().unwrap().iter_mut() {
-            hq_image.active =
-                hq_image.decompressing || hq_image.original_image == src_image as usize;
-            hq_image.decompressing = false;
-        }
+        let mut decompressed = DECOMPRESSED.lock().unwrap();
+
+        let hq_images = HQ_IMAGES.lock().unwrap();
+        *BACKGROUND.lock().unwrap() = find_hq_image(&hq_images, image_addr).cloned();
+        let image_addr = if *decompressed != 0 {
+            *decompressed
+        } else {
+            src_image as usize
+        };
+
+        *decompressed = 0;
     }
 
     unsafe {
@@ -158,7 +170,7 @@ pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c
     }
 
     // check if any hq image is "active", if it is attach it as the background
-    if let Some(hq_image) = active_hq_image(&HQ_IMAGES.lock().unwrap()) {
+    if let Some(hq_image) = BACKGROUND.lock().unwrap().as_ref() {
         debug::info(format!(
             "Surface Address: 0x{:x}, Image Data: 0x{:x}",
             surface as usize, image_data as usize
@@ -196,7 +208,7 @@ pub extern "C" fn manage_resource(resource: *mut grim::Resource) -> c_int {
         HQ_IMAGES
             .lock()
             .unwrap()
-            .retain(|hq_image| hq_image.original_image != asset);
+            .retain(|hq_image| hq_image.original_addr != asset);
     }
 
     unsafe { grim::manage_resource(resource) }
@@ -206,7 +218,7 @@ fn drawing_hq_background(draw: *const grim::Draw) -> bool {
     let Some(surface) = unsafe { draw.as_ref() }.map(|draw| draw.surfaces[0] as usize) else {
         return false;
     };
-    surface == bitmap_underlays_surface() && active_hq_image(&HQ_IMAGES.lock().unwrap()).is_some()
+    surface == bitmap_underlays_surface() && BACKGROUND.lock().unwrap().is_some()
 }
 
 /// Sets the OpenGL state for the next draw call
