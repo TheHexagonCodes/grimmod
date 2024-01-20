@@ -10,15 +10,15 @@ use crate::gl;
 use crate::grim;
 
 pub static DECOMPRESSED: Mutex<usize> = Mutex::new(0);
-pub static BACKGROUND: Mutex<Option<HqImage>> = Mutex::new(None);
+pub static BACKGROUND: Mutex<Option<HqImageContainer>> = Mutex::new(None);
 
 lazy_static! {
-    pub static ref HQ_IMAGES: Mutex<Vec<HqImage>> = Mutex::new(Vec::new());
+    pub static ref HQ_IMAGES: Mutex<Vec<HqImageContainer>> = Mutex::new(Vec::new());
     pub static ref BACKGROUND_SHADER: usize = compile_background_shader() as usize;
 }
 
 #[derive(Clone)]
-pub struct HqImage {
+pub struct HqImageContainer {
     pub path: String,
     pub name: String,
     pub width: u32,
@@ -63,7 +63,7 @@ pub extern "C" fn open_bm_image(
     image_container_raw
 }
 
-fn open_hq_image(filename: &str, original_addr: usize) -> Option<HqImage> {
+fn open_hq_image(filename: &str, original_addr: usize) -> Option<HqImageContainer> {
     if !filename.ends_with(".bm") && !filename.ends_with(".BM") {
         return None;
     }
@@ -76,7 +76,7 @@ fn open_hq_image(filename: &str, original_addr: usize) -> Option<HqImage> {
 
     let image = image::open(modded_path).ok()?;
 
-    Some(HqImage {
+    Some(HqImageContainer {
         name: filename.to_lowercase(),
         path: modded_filename,
         width: image.width(),
@@ -88,9 +88,9 @@ fn open_hq_image(filename: &str, original_addr: usize) -> Option<HqImage> {
 }
 
 fn find_hq_image<'a>(
-    hq_images: &'a MutexGuard<'a, Vec<HqImage>>,
+    hq_images: &'a MutexGuard<'a, Vec<HqImageContainer>>,
     original_addr: usize,
-) -> Option<&'a HqImage> {
+) -> Option<&'a HqImageContainer> {
     hq_images
         .iter()
         .find(|hq_image| hq_image.original_addr == original_addr)
