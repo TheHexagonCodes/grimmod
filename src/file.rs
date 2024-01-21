@@ -27,6 +27,11 @@ pub fn find_modded(filename: &str) -> Option<PathBuf> {
     entries.next().map(Result::unwrap)
 }
 
+pub fn find_all_modded(filename: &str) -> impl Iterator<Item = PathBuf> {
+    let entries = glob(format!("./Mods/*/resources/{}", filename).as_ref()).unwrap();
+    entries.filter_map(|entry| entry.ok())
+}
+
 /// Enhances the game's open file function, opening modded files if found
 pub extern "C" fn open(raw_filename: *mut c_char, mode: *mut c_char) -> *mut c_void {
     let Ok(filename) = unsafe { CStr::from_ptr(raw_filename) }.to_str() else {

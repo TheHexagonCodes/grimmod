@@ -28,6 +28,7 @@ pub struct HqImageContainer {
 pub struct HqImage {
     pub width: u32,
     pub height: u32,
+    pub scale: u32,
     pub path: String,
     pub original_addr: usize,
     pub buffer: Vec<u8>,
@@ -39,31 +40,41 @@ impl HqImageContainer {
     ) -> Option<HqImageContainer> {
         let image_container = raw_image_container.as_ref()?;
         let name = image_container.name.as_ptr();
-        let image_refs = std::slice::from_raw_parts(image_container.images, 1);
+        let n_images = image_container.image_count as usize;
+        let image_refs = std::slice::from_raw_parts(image_container.images, n_images);
+        let images: Vec<_> = image_refs
+            .iter()
+            .filter_map(|image| image.as_ref())
+            .collect();
         let filename = CStr::from_ptr(name).to_str().ok()?;
-        HqImageContainer::open(filename, image_container, image_refs[0].as_ref()?)
+        HqImageContainer::open(filename, image_container, images)
     }
 
     fn open(
         bm_filename: &str,
         image_container: &grim::ImageContainer,
-        image: &grim::Image,
+        images: Vec<&grim::Image>,
     ) -> Option<HqImageContainer> {
         let name = Path::new(bm_filename).file_stem()?.to_str()?;
-        let image_path = HqImage::find_modded_path(name)?;
-        let hq_image = HqImage::open_all(name, image_path, image)?;
+        let image_paths = HqImage::find_modded_paths(name)?;
+        let hq_images = HqImage::open_all(name, image_paths, images)?;
 
         Some(HqImageContainer {
             name: name.to_string(),
             original_addr: image_container as *const _ as usize,
-            images: vec![hq_image],
+            images: hq_images,
         })
     }
 }
 
 impl HqImage {
-    fn open_all(name: &str, path: PathBuf, image: &grim::Image) -> Option<HqImage> {
-        let png = match image::open(&path) {
+    fn open_all(
+        name: &str,
+        paths: Vec<PathBuf>,
+        images: Vec<&grim::Image>,
+    ) -> Option<Vec<HqImage>> {
+        let try_pngs: Result<Vec<_>, _> = paths.iter().map(image::open).collect();
+        let pngs = match try_pngs {
             Ok(pngs) => Some(pngs),
             Err(error) => {
                 debug::error(format!("Could not open {} image: {}", name, error));
@@ -71,17 +82,31 @@ impl HqImage {
             }
         }?;
 
-        Some(HqImage {
-            width: png.width(),
-            height: png.height(),
-            path: path.display().to_string(),
-            original_addr: image as *const _ as usize,
-            buffer: png.to_rgb8().into_vec(),
-        })
+        Some(
+            pngs.into_iter()
+                .zip(images)
+                .zip(paths)
+                .map(|((png, image), path)| HqImage {
+                    width: png.width(),
+                    height: png.height(),
+                    scale: png.width() / image.attributes.width as u32,
+                    path: path.display().to_string(),
+                    original_addr: image as *const _ as usize,
+                    buffer: png.to_rgb8().into_vec(),
+                })
+                .collect(),
+        )
     }
 
-    fn find_modded_path(name: &str) -> Option<PathBuf> {
-        file::find_modded(&format!("{}.png", name))
+    fn find_modded_paths(name: &str) -> Option<Vec<PathBuf>> {
+        let is_animated = file::find_modded(&format!("{}/01.png", name)).is_some();
+        let mut image_paths = if is_animated {
+            Some(file::find_all_modded(&format!("{}/*.png", name)).collect())
+        } else {
+            file::find_modded(&format!("{}.png", name)).map(|image| vec![image])
+        }?;
+        image_paths.sort();
+        Some(image_paths)
     }
 
     fn find_loaded<'a>(
@@ -145,8 +170,8 @@ pub extern "C" fn copy_image(
     dst_surface: *mut c_void,
     src_image: *mut grim::Image,
     src_surface: *mut c_void,
-    param_5: u32,
-    param_6: u32,
+    x: u32,
+    y: u32,
     param_7: u32,
     param_8: u32,
 ) {
@@ -163,7 +188,27 @@ pub extern "C" fn copy_image(
 
         let hq_images = HQ_IMAGES.lock().unwrap();
         let hq_image = HqImage::find_loaded(image_addr, &hq_images);
-        *BACKGROUND.lock().unwrap() = hq_image.cloned();
+        if x == 0 && y == 0 {
+            *BACKGROUND.lock().unwrap() = hq_image.cloned();
+        } else if let Some(frame) = hq_image {
+            let mut background = BACKGROUND.lock().unwrap();
+            if let Some(background) = background.as_mut()
+                && background.scale == frame.scale
+            {
+                let bytes_per_pixel = 3;
+                let x = (x * frame.scale) as usize;
+                let y = (y * frame.scale) as usize;
+                let width = frame.width as usize;
+                let bytes_width = width * bytes_per_pixel;
+                for i in 0..frame.height as usize {
+                    let src_start = i * width * 3;
+                    let src_slice = &frame.buffer[src_start..src_start + bytes_width];
+                    let dst_start = (background.width as usize * (y + i) + x) * bytes_per_pixel;
+                    let dst_slice = &mut background.buffer[dst_start..dst_start + bytes_width];
+                    dst_slice.copy_from_slice(src_slice);
+                }
+            }
+        }
 
         *decompressed = 0;
     }
@@ -174,8 +219,8 @@ pub extern "C" fn copy_image(
             dst_surface,
             src_image,
             src_surface,
-            param_5,
-            param_6,
+            x,
+            y,
             param_7,
             param_8,
         )
