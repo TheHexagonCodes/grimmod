@@ -9,7 +9,16 @@ use crate::file;
 use crate::gl;
 use crate::grim;
 
-pub static DECOMPRESSED: Mutex<usize> = Mutex::new(0);
+#[derive(Clone, Copy, Default, Hash, Eq, PartialEq)]
+pub struct ImageContainerAddr(usize);
+
+#[derive(Clone, Copy, Default, Hash, Eq, PartialEq)]
+pub struct ImageAddr(usize);
+
+#[derive(Clone, Copy, Default, Hash, Eq, PartialEq)]
+pub struct SurfaceAddr(usize);
+
+pub static DECOMPRESSED: Mutex<ImageAddr> = Mutex::new(ImageAddr(0));
 pub static BACKGROUND: Mutex<Option<HqImage>> = Mutex::new(None);
 
 lazy_static! {
@@ -20,7 +29,7 @@ lazy_static! {
 #[derive(Clone)]
 pub struct HqImageContainer {
     pub name: String,
-    pub original_addr: usize,
+    pub original_addr: ImageContainerAddr,
     pub images: Vec<HqImage>,
 }
 
@@ -30,7 +39,7 @@ pub struct HqImage {
     pub height: u32,
     pub scale: u32,
     pub path: String,
-    pub original_addr: usize,
+    pub original_addr: ImageAddr,
     pub buffer: Vec<u8>,
 }
 
@@ -61,7 +70,7 @@ impl HqImageContainer {
 
         Some(HqImageContainer {
             name: name.to_string(),
-            original_addr: image_container as *const _ as usize,
+            original_addr: ImageContainerAddr(image_container as *const _ as usize),
             images: hq_images,
         })
     }
@@ -91,7 +100,7 @@ impl HqImage {
                     height: png.height(),
                     scale: png.width() / image.attributes.width as u32,
                     path: path.display().to_string(),
-                    original_addr: image as *const _ as usize,
+                    original_addr: ImageAddr(image as *const _ as usize),
                     buffer: png.to_rgb8().into_vec(),
                 })
                 .collect(),
@@ -110,7 +119,7 @@ impl HqImage {
     }
 
     fn find_loaded<'a>(
-        original_addr: usize,
+        original_addr: ImageAddr,
         hq_images: &'a MutexGuard<'a, Vec<HqImageContainer>>,
     ) -> Option<&'a HqImage> {
         hq_images.iter().find_map(|hq_image_container| {
@@ -123,13 +132,24 @@ impl HqImage {
 }
 
 /// Return the address for the background render pass's surface
-fn bitmap_underlays_surface() -> usize {
+fn bitmap_underlays_surface() -> Option<SurfaceAddr> {
     unsafe {
         let render_pass = grim::BITMAP_UNDERLAYS_RENDER_PASS.inner_ref();
         let render_pass_data = render_pass.and_then(|render_pass| render_pass.data.as_ref());
         let surface = render_pass_data.map(|render_pass_data| render_pass_data.surface as usize);
-        surface.unwrap_or(0)
+        surface.map(SurfaceAddr)
     }
+}
+
+fn extract_mutex<T: Copy + Default + Eq>(mutex: &Mutex<T>) -> Option<T> {
+    let mut guard = mutex.lock().ok()?;
+    let result = if *guard == Default::default() {
+        None
+    } else {
+        Some(*guard)
+    };
+    *guard = Default::default();
+    result
 }
 
 /// Loads the contents of a BM file into an image container
@@ -157,7 +177,7 @@ pub extern "C" fn open_bm_image(
 pub extern "C" fn decompress_image(image: *const grim::Image) {
     // store the address of the last image decompressed
     // it will shortly be copied to the clean buffer and rendered
-    *DECOMPRESSED.lock().unwrap() = image as usize;
+    *DECOMPRESSED.lock().unwrap() = ImageAddr(image as usize);
 
     unsafe { grim::decompress_image(image) }
 }
@@ -179,12 +199,7 @@ pub extern "C" fn copy_image(
     // either directly or from a recent decompression
     // an image being copied to the clean buffer means it is about to get rendered
     if dst_image as usize == unsafe { grim::CLEAN_BUFFER.inner_addr() } {
-        let mut decompressed = DECOMPRESSED.lock().unwrap();
-        let image_addr = if *decompressed != 0 {
-            *decompressed
-        } else {
-            src_image as usize
-        };
+        let image_addr = extract_mutex(&DECOMPRESSED).unwrap_or(ImageAddr(src_image as usize));
 
         let hq_images = HQ_IMAGES.lock().unwrap();
         let hq_image = HqImage::find_loaded(image_addr, &hq_images);
@@ -210,7 +225,6 @@ pub extern "C" fn copy_image(
             }
         }
 
-        *decompressed = 0;
     }
 
     unsafe {
@@ -231,6 +245,8 @@ pub extern "C" fn copy_image(
 ///
 /// This is an overload for a native function that will be hooked
 pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c_void) {
+    let surface_addr = SurfaceAddr(surface as usize);
+
     unsafe {
         // call with null to reset the buffer size as it might have been changed by a hq image
         grim::surface_upload(surface, std::ptr::null_mut());
@@ -239,7 +255,7 @@ pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c
 
     // check if the "bitmap underlays" surface's data is being uploaded
     // this signals that the active background is being set
-    if image_data.is_null() || surface as usize != bitmap_underlays_surface() {
+    if image_data.is_null() || bitmap_underlays_surface() != Some(surface_addr) {
         return;
     }
 
@@ -276,7 +292,7 @@ pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c
 
 pub extern "C" fn manage_resource(resource: *mut grim::Resource) -> c_int {
     let state = unsafe { (*resource).state };
-    let asset = unsafe { (*resource).asset as usize };
+    let asset = ImageContainerAddr(unsafe { (*resource).asset as usize });
 
     if state == 2 {
         HQ_IMAGES
@@ -289,10 +305,10 @@ pub extern "C" fn manage_resource(resource: *mut grim::Resource) -> c_int {
 }
 
 fn drawing_hq_background(draw: *const grim::Draw) -> bool {
-    let Some(surface) = unsafe { draw.as_ref() }.map(|draw| draw.surfaces[0] as usize) else {
+    let Some(surface) = unsafe { draw.as_ref() }.map(|draw| SurfaceAddr(draw.surfaces[0] as usize)) else {
         return false;
     };
-    surface == bitmap_underlays_surface() && BACKGROUND.lock().unwrap().is_some()
+    bitmap_underlays_surface() == Some(surface) && BACKGROUND.lock().unwrap().is_some()
 }
 
 /// Sets the OpenGL state for the next draw call
