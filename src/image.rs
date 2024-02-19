@@ -74,6 +74,10 @@ impl HqImageContainer {
             images: hq_images,
         })
     }
+
+    fn deallocate(index: usize, hq_image_containers: &mut MutexGuard<'_, Vec<HqImageContainer>>) {
+        hq_image_containers.remove(index);
+    }
 }
 
 impl HqImage {
@@ -162,6 +166,25 @@ pub extern "C" fn open_bm_image(
 ) -> *mut grim::ImageContainer {
     unsafe {
         let image_container = grim::open_bm_image(raw_filename, param_2, param_3);
+
+        // instead of allocating a new image, the game sometimes reuses an existing one
+        // detect this re-use and treat it as a deallocation for old hq images
+        if let Some(image_container) = image_container.as_ref() {
+            let image_addrs = std::slice::from_raw_parts(
+                image_container.images as *const usize,
+                image_container.image_count as usize,
+            );
+            let mut hq_image_containers = HQ_IMAGES.lock().unwrap();
+            let index = hq_image_containers.iter().position(|image_container| {
+                image_container
+                    .images
+                    .iter()
+                    .any(|image| image_addrs.contains(&image.original_addr.0))
+            });
+            if let Some(index) = index {
+                HqImageContainer::deallocate(index, &mut hq_image_containers);
+            }
+        }
 
         if let Some(hq_image_container) = HqImageContainer::from_raw(image_container) {
             HQ_IMAGES.lock().unwrap().push(hq_image_container);
@@ -292,13 +315,16 @@ pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c
 
 pub extern "C" fn manage_resource(resource: *mut grim::Resource) -> c_int {
     let state = unsafe { (*resource).state };
-    let asset = ImageContainerAddr(unsafe { (*resource).asset as usize });
+    let image_container_addr = ImageContainerAddr(unsafe { (*resource).image_container as usize });
 
     if state == 2 {
-        HQ_IMAGES
-            .lock()
-            .unwrap()
-            .retain(|hq_image| hq_image.original_addr != asset);
+        let mut hq_image_containers = HQ_IMAGES.lock().unwrap();
+        let index = hq_image_containers.iter().position(|hq_image_container| {
+            hq_image_container.original_addr == image_container_addr
+        });
+        if let Some(index) = index {
+            HqImageContainer::deallocate(index, &mut hq_image_containers);
+        }
     }
 
     unsafe { grim::manage_resource(resource) }

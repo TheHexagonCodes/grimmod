@@ -191,6 +191,6 @@ pub struct Resource {
     pub state: u32,
     pub filename: *const c_char,
     pub kind: *const c_char,
-    pub asset: *const c_void,
+    pub image_container: *const ImageContainer,
     pub size: isize,
 }
