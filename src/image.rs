@@ -1,4 +1,5 @@
 use lazy_static::lazy_static;
+use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ffi::{c_char, c_int, c_uint, CStr, CString};
 use std::path::{Path, PathBuf};
@@ -19,11 +20,13 @@ pub struct ImageAddr(usize);
 pub struct SurfaceAddr(usize);
 
 pub static DECOMPRESSED: Mutex<ImageAddr> = Mutex::new(ImageAddr(0));
+pub static OVERLAY: Mutex<ImageAddr> = Mutex::new(ImageAddr(0));
 pub static BACKGROUND: Mutex<Option<HqImage>> = Mutex::new(None);
 
 lazy_static! {
     pub static ref HQ_IMAGES: Mutex<Vec<HqImageContainer>> = Mutex::new(Vec::new());
     pub static ref BACKGROUND_SHADER: usize = compile_background_shader() as usize;
+    pub static ref OVERLAYS: Mutex<HashMap<SurfaceAddr, ImageAddr>> = Mutex::new(HashMap::new());
 }
 
 #[derive(Clone)]
@@ -76,7 +79,11 @@ impl HqImageContainer {
     }
 
     fn deallocate(index: usize, hq_image_containers: &mut MutexGuard<'_, Vec<HqImageContainer>>) {
-        hq_image_containers.remove(index);
+        let hq_image_container = hq_image_containers.remove(index);
+        let mut overlays = OVERLAYS.lock().unwrap();
+        for hq_image in hq_image_container.images.iter() {
+            overlays.retain(|_, image_addr| image_addr != &hq_image.original_addr);
+        }
     }
 }
 
@@ -219,11 +226,10 @@ pub extern "C" fn copy_image(
     param_8: u32,
 ) {
     // detect an image with an associated hq image being copied to the clean buffer
-    // either directly or from a recent decompression
-    // an image being copied to the clean buffer means it is about to get rendered
+    // an image being copied to the clean first buffer means it is a background (or about to draw
+    // over the background) to be rendered
     if dst_image as usize == unsafe { grim::CLEAN_BUFFER.inner_addr() } {
         let image_addr = extract_mutex(&DECOMPRESSED).unwrap_or(ImageAddr(src_image as usize));
-
         let hq_images = HQ_IMAGES.lock().unwrap();
         let hq_image = HqImage::find_loaded(image_addr, &hq_images);
         if x == 0 && y == 0 {
@@ -247,7 +253,18 @@ pub extern "C" fn copy_image(
                 }
             }
         }
+    }
 
+    // if an image with an associated hq image is being written directly to the back buffer
+    // then that indicates that it's an overlay
+    // store this overlay temporarily to see what surface is allocated from it
+    if dst_image as usize == unsafe { grim::BACK_BUFFER.addr() } {
+        let image_addr = extract_mutex(&DECOMPRESSED).unwrap_or(ImageAddr(src_image as usize));
+        let hq_images = HQ_IMAGES.lock().unwrap();
+        let hq_image = HqImage::find_loaded(image_addr, &hq_images);
+        if hq_image.is_some() {
+            *OVERLAY.lock().unwrap() = image_addr;
+        }
     }
 
     unsafe {
@@ -276,41 +293,75 @@ pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c
         grim::surface_upload(surface, image_data);
     }
 
-    // check if the "bitmap underlays" surface's data is being uploaded
-    // this signals that the active background is being set
-    if image_data.is_null() || bitmap_underlays_surface() != Some(surface_addr) {
+    if image_data.is_null() {
         return;
     }
 
-    // check if any hq image is "active", if it is attach it as the background
-    if let Some(hq_image) = BACKGROUND.lock().unwrap().as_ref() {
-        debug::info(format!(
-            "Surface Address: 0x{:x}, Image Data: 0x{:x}",
-            surface as usize, image_data as usize
-        ));
-
-        let texture_id = unsafe { surface.as_ref() }
+    let texture_id = unsafe {
+        surface
+            .as_ref()
             .map(|surface| surface.texture_id)
-            .unwrap_or(0);
-        let hq_image_data: *const [u8] = hq_image.buffer.as_ref();
+            .unwrap_or(0)
+    };
 
-        unsafe {
-            gl::pixel_storei(gl::UNPACK_ALIGNMENT, 1);
-            gl::bind_texture(gl::TEXTURE_2D, texture_id);
-            gl::pixel_storei(gl::UNPACK_ROW_LENGTH, hq_image.width as gl::Int);
-            gl::tex_image_2d(
-                gl::TEXTURE_2D,
-                0,
-                gl::RGB as gl::Int,
-                hq_image.width as gl::Int,
-                hq_image.height as gl::Int,
-                0,
-                gl::RGB,
-                gl::UNSIGNED_BYTE,
-                hq_image_data as *const c_void,
-            );
+    // check if the "bitmap underlays" surface's data is being uploaded
+    // this indicates that the active background is being drawn
+    if bitmap_underlays_surface() == Some(surface_addr) {
+        if let Some(hq_image) = BACKGROUND.lock().unwrap().as_ref() {
+            upload_hq_image(hq_image, texture_id);
         }
     }
+
+    // check if the surface has recently been associated with an overlay
+    // this indicates that that overlay is being drawn
+    let overlays = OVERLAYS.lock().unwrap();
+    if let Some(&image_addr) = overlays.get(&surface_addr) {
+        let hq_images = HQ_IMAGES.lock().unwrap();
+        if let Some(hq_image) = HqImage::find_loaded(image_addr, &hq_images) {
+            upload_hq_image(hq_image, texture_id);
+        }
+    }
+}
+
+fn upload_hq_image(hq_image: &HqImage, texture_id: u32) {
+    let hq_image_data: *const [u8] = hq_image.buffer.as_ref();
+
+    unsafe {
+        gl::pixel_storei(gl::UNPACK_ALIGNMENT, 1);
+        gl::bind_texture(gl::TEXTURE_2D, texture_id);
+        gl::pixel_storei(gl::UNPACK_ROW_LENGTH, hq_image.width as gl::Int);
+        gl::tex_image_2d(
+            gl::TEXTURE_2D,
+            0,
+            gl::RGB as gl::Int,
+            hq_image.width as gl::Int,
+            hq_image.height as gl::Int,
+            0,
+            gl::RGB,
+            gl::UNSIGNED_BYTE,
+            hq_image_data as *const c_void,
+        );
+    }
+}
+
+/// Allocate a new surface (texture) of a given width/height
+///
+/// This is an overload for a native function that will be hooked
+pub extern "C" fn surface_allocate(
+    width: c_int,
+    height: c_int,
+    format: c_uint,
+    param_4: c_int,
+) -> *const grim::Surface {
+    let surface = unsafe { grim::surface_allocate(width, height, format, param_4) };
+    let surface_addr = SurfaceAddr(surface as usize);
+
+    // if a hq overlay was just loaded, store it with its new associated surface
+    if let Some(image_addr) = extract_mutex(&OVERLAY) {
+        OVERLAYS.lock().unwrap().insert(surface_addr, image_addr);
+    }
+
+    surface
 }
 
 pub extern "C" fn manage_resource(resource: *mut grim::Resource) -> c_int {
@@ -330,20 +381,26 @@ pub extern "C" fn manage_resource(resource: *mut grim::Resource) -> c_int {
     unsafe { grim::manage_resource(resource) }
 }
 
-fn drawing_hq_background(draw: *const grim::Draw) -> bool {
-    let Some(surface) = unsafe { draw.as_ref() }.map(|draw| SurfaceAddr(draw.surfaces[0] as usize)) else {
+fn is_drawing_hq(draw: *const grim::Draw) -> bool {
+    let Some(surface) = drawing_surface(draw) else {
         return false;
     };
-    bitmap_underlays_surface() == Some(surface) && BACKGROUND.lock().unwrap().is_some()
+
+    (Some(surface) == bitmap_underlays_surface() && BACKGROUND.lock().unwrap().is_some())
+        || OVERLAYS.lock().unwrap().contains_key(&surface)
+}
+
+fn drawing_surface(draw: *const grim::Draw) -> Option<SurfaceAddr> {
+    unsafe { draw.as_ref() }.map(|draw| SurfaceAddr(draw.surfaces[0] as usize))
 }
 
 /// Sets the OpenGL state for the next draw call
 ///
 /// This is an overload for a native function that will be hooked
 pub extern "C" fn setup_draw(draw: *mut grim::Draw, index_buffer: *const c_void) {
-    let hq = drawing_hq_background(draw);
+    let hq = is_drawing_hq(draw);
 
-    // for hq backgrounds, use a custom shader that keeps the full resolution
+    // for hq images, use a custom shader that keeps the full resolution
     if hq && let Some(draw) = unsafe { draw.as_mut() } {
         draw.shader = *BACKGROUND_SHADER as *const grim::Shader;
     }
@@ -351,12 +408,18 @@ pub extern "C" fn setup_draw(draw: *mut grim::Draw, index_buffer: *const c_void)
     unsafe {
         grim::setup_draw(draw, index_buffer);
 
-        // for hq backgrounds, use a linear texture filter for better quality
+        // for hq images, use a linear texture filter for better quality
         let sampler = draw.as_ref().map(|draw| draw.samplers[0] as c_uint);
         if hq && let Some(sampler) = sampler {
             gl::sampler_parameteri(sampler, gl::TEXTURE_MIN_FILTER, gl::LINEAR as gl::Int);
             gl::sampler_parameteri(sampler, gl::TEXTURE_MAG_FILTER, gl::LINEAR as gl::Int);
         }
+    }
+
+    // once an overlay has been drawn, remove it from the list of overlays
+    // if an overlay lasts for many frames, it will get reloaded every frame with a new surface
+    if hq && let Some(surface_addr) = drawing_surface(draw) {
+        OVERLAYS.lock().unwrap().remove(&surface_addr);
     }
 }
 

@@ -14,6 +14,8 @@ pub static mut read_all: DirectFn<ReadAll> = DirectFn::new("read_all", 0xE6700);
 // functions for loading images and preparing textures
 pub static mut open_bm_image: DirectFn<OpenBmImage> = DirectFn::new("open_bm_image", 0xDADE0);
 pub static mut surface_upload: DirectFn<SurfaceUpload> = DirectFn::new("surface_upload", 0xE8A80);
+pub static mut surface_allocate: DirectFn<SurfaceAllocate> =
+    DirectFn::new("surface_allocate", 0xECF70);
 pub static mut copy_image: DirectFn<CopyImage> = DirectFn::new("copy_image", 0xE5EC0);
 pub static mut decompress_image: DirectFn<DecompressImage> =
     DirectFn::new("decompress_image", 0x24D20);
@@ -22,8 +24,9 @@ pub static mut manage_resource: DirectFn<ManageResource> =
 pub static mut setup_draw: DirectFn<SetupDraw> = DirectFn::new("setup_draw", 0xF3540);
 pub static mut compile_shader: DirectFn<CompileShader> = DirectFn::new("compile_shader", 0xF2000);
 
-// backgrounds are copied into the clean buffer before rendering
+// buffers used for backgrounds and overlays
 pub static mut CLEAN_BUFFER: Value<*const *const Image> = Value::new(0x1691C7C);
+pub static mut BACK_BUFFER: Value<*const Image> = Value::new(0x31B4DA0);
 // backgrounds' render pass data
 pub static mut BITMAP_UNDERLAYS_RENDER_PASS: Value<*const *const RenderPass> =
     Value::new(0x30861E4);
@@ -38,6 +41,8 @@ pub type OpenBmImage = extern "C" fn(*const c_char, u32, u32) -> *mut ImageConta
 pub type CopyImage =
     extern "C" fn(*mut Image, *mut c_void, *mut Image, *mut c_void, u32, u32, u32, u32);
 pub type SurfaceUpload = extern "C" fn(*mut Surface, *mut c_void);
+pub type SurfaceAllocate =
+    extern "C" fn(width: c_int, height: c_int, format: c_uint, param_4: c_int) -> *const Surface;
 pub type DecompressImage = extern "C" fn(*const Image);
 pub type ManageResource = extern "C" fn(*mut Resource) -> c_int;
 pub type SetupDraw = extern "C" fn(*mut Draw, *const c_void);
