@@ -13,7 +13,6 @@ use windows::Win32::Foundation::BOOL;
 use windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
 
 fn main() {
-    debug::init();
     debug::info("GrimMod attached to GrimFandango.exe");
 
     debug::info(format!(

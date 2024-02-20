@@ -1,25 +1,22 @@
-use std::fs::OpenOptions;
+use lazy_static::lazy_static;
+use std::fs::{File, OpenOptions};
 use std::io::Write;
 
-static LOG_FILE: &str = "grimmod.log";
+const LOG_FILENAME: &str = "grimmod.log";
 
-pub fn init() -> Option<()> {
-    OpenOptions::new()
+lazy_static! {
+    static ref LOG_FILE: Option<File> = OpenOptions::new()
         .write(true)
         .truncate(true)
         .create(true)
-        .open(LOG_FILE)
-        .ok()
-        .map(|_| ())
+        .open(LOG_FILENAME)
+        .ok();
 }
 
 pub fn write<T: AsRef<str>>(message: T) -> Option<()> {
-    let mut file = OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(LOG_FILE)
-        .ok()?;
-    writeln!(file, "{}", message.as_ref()).ok()?;
+    if let Some(mut log_file) = LOG_FILE.as_ref() {
+        writeln!(log_file, "{}", message.as_ref()).ok()?;
+    }
     Some(())
 }
 
