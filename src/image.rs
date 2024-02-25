@@ -289,7 +289,9 @@ pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c
 
     unsafe {
         // call with null to reset the buffer size as it might have been changed by a hq image
-        grim::surface_upload(surface, std::ptr::null_mut());
+        if !image_data.is_null() {
+            grim::surface_upload(surface, std::ptr::null_mut());
+        }
         grim::surface_upload(surface, image_data);
     }
 
