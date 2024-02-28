@@ -112,7 +112,7 @@ impl HqImage {
                     scale: png.width() / image.attributes.width as u32,
                     path: path.display().to_string(),
                     original_addr: ImageAddr(image as *const _ as usize),
-                    buffer: png.to_rgb8().into_vec(),
+                    buffer: png.to_rgba8().into_vec(),
                 })
                 .collect(),
         )
@@ -239,7 +239,7 @@ pub extern "C" fn copy_image(
             if let Some(background) = background.as_mut()
                 && background.scale == frame.scale
             {
-                let bytes_per_pixel = 3;
+                let bytes_per_pixel = 4;
                 let x = (x * frame.scale) as usize;
                 let y = (y * frame.scale) as usize;
                 let width = frame.width as usize;
@@ -335,11 +335,11 @@ fn upload_hq_image(hq_image: &HqImage, texture_id: u32) {
         gl::tex_image_2d(
             gl::TEXTURE_2D,
             0,
-            gl::RGB as gl::Int,
+            gl::RGBA8 as gl::Int,
             hq_image.width as gl::Int,
             hq_image.height as gl::Int,
             0,
-            gl::RGB,
+            gl::RGBA,
             gl::UNSIGNED_BYTE,
             hq_image_data as *const c_void,
         );
