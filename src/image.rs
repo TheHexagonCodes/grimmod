@@ -38,6 +38,7 @@ pub struct HqImageContainer {
 
 #[derive(Clone)]
 pub struct HqImage {
+    pub name: String,
     pub width: u32,
     pub height: u32,
     pub scale: u32,
@@ -106,7 +107,9 @@ impl HqImage {
             pngs.into_iter()
                 .zip(images)
                 .zip(paths)
-                .map(|((png, image), path)| HqImage {
+                .enumerate()
+                .map(|(i, ((png, image), path))| HqImage {
+                    name: format!("{} ({:02})", name, i),
                     width: png.width(),
                     height: png.height(),
                     scale: png.width() / image.attributes.width as u32,
