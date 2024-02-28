@@ -4,7 +4,6 @@ use std::ffi::{c_int, c_uint, c_void};
 
 use crate::process::IndirectFn;
 
-pub static mut bind_texture: IndirectFn<BindTexture> = IndirectFn::new("gl_bind_texture", 0x1713E8);
 pub static mut tex_image_2d: IndirectFn<TexImage2D> = IndirectFn::new("gl_text_image_2d", 0x1713E0);
 
 // pub static mut use_program: IndirectFn<UseProgram> = IndirectFn::new("gl_use_program", 0x2E837E4);
@@ -21,7 +20,6 @@ pub type Int = c_int;
 pub type Enum = c_uint;
 pub type Sizei = c_int;
 
-pub type BindTexture = extern "stdcall" fn(target: Enum, texture: Uint);
 pub type TexImage2D = extern "stdcall" fn(
     target: Enum,
     level: Int,
@@ -42,7 +40,6 @@ pub type SamplerParameteri = extern "stdcall" fn(sampler: Uint, pname: Enum, par
 pub type SdlSetSwapInterval = extern "C" fn(interval: c_int) -> c_int;
 
 pub const UNPACK_ROW_LENGTH: Enum = 0x0CF2;
-pub const UNPACK_ALIGNMENT: Enum = 0x0CF5;
 pub const TEXTURE_2D: Enum = 0x0DE1;
 pub const UNSIGNED_BYTE: Enum = 0x1401;
 pub const RGBA: Enum = 0x1908;

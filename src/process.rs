@@ -213,6 +213,13 @@ impl<F> IndirectFn<F> {
         write(self.address(), replacement_addr);
     }
 
+    pub unsafe fn unhook(&mut self) {
+        if let Some(original_addr) = self.hooked {
+            write(self.address(), original_addr);
+            self.hooked = None;
+        }
+    }
+
     pub unsafe fn fn_addr(&self) -> usize {
         if let Some(original_addr) = self.hooked {
             original_addr

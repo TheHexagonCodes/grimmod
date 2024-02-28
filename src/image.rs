@@ -22,11 +22,18 @@ pub struct SurfaceAddr(usize);
 pub static DECOMPRESSED: Mutex<Option<ImageAddr>> = Mutex::new(None);
 pub static OVERLAY: Mutex<Option<ImageAddr>> = Mutex::new(None);
 pub static BACKGROUND: Mutex<Option<HqImage>> = Mutex::new(None);
+pub static TARGET: Mutex<Option<Target>> = Mutex::new(None);
 
 lazy_static! {
     pub static ref HQ_IMAGES: Mutex<Vec<HqImageContainer>> = Mutex::new(Vec::new());
     pub static ref BACKGROUND_SHADER: usize = compile_background_shader() as usize;
     pub static ref OVERLAYS: Mutex<HashMap<SurfaceAddr, ImageAddr>> = Mutex::new(HashMap::new());
+}
+
+#[derive(Debug)]
+pub enum Target {
+    Background,
+    Image(ImageAddr),
 }
 
 #[derive(Clone)]
@@ -282,52 +289,75 @@ pub extern "C" fn copy_image(
 /// This is an overload for a native function that will be hooked
 pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c_void) {
     let surface_addr = SurfaceAddr(surface as usize);
+    let target = get_target(surface_addr);
 
-    unsafe {
-        // call with null to reset the buffer size as it might have been changed by a hq image
-        if !image_data.is_null() {
-            grim::surface_upload(surface, std::ptr::null_mut());
-        }
-        grim::surface_upload(surface, image_data);
+    if target.is_none() {
+        return unsafe {
+            // call with null to reset the buffer size as it might have been changed by a hq image
+            if !image_data.is_null() {
+                grim::surface_upload(surface, std::ptr::null_mut());
+            }
+            grim::surface_upload(surface, image_data);
+        };
     }
 
     if image_data.is_null() {
         return;
     }
 
-    let texture_id = unsafe {
-        surface
-            .as_ref()
-            .map(|surface| surface.texture_id)
-            .unwrap_or(0)
-    };
-
-    // check if the "bitmap underlays" surface's data is being uploaded
-    // this indicates that the active background is being drawn
-    if bitmap_underlays_surface() == Some(surface_addr) {
-        if let Some(hq_image) = BACKGROUND.lock().unwrap().as_ref() {
-            upload_hq_image(hq_image, texture_id);
-        }
+    *TARGET.lock().unwrap() = target;
+    unsafe {
+        gl::tex_image_2d.hook(hq_tex_image_2d as gl::TexImage2D);
+        gl::pixel_storei.hook(hq_pixel_storei as gl::PixelStorei);
+        grim::surface_upload(surface, std::ptr::null_mut());
+        gl::pixel_storei.unhook();
+        gl::tex_image_2d.unhook();
     }
+    *TARGET.lock().unwrap() = None;
+}
 
-    // check if the surface has recently been associated with an overlay
-    // this indicates that that overlay is being drawn
-    let overlays = OVERLAYS.lock().unwrap();
-    if let Some(&image_addr) = overlays.get(&surface_addr) {
-        let hq_images = HQ_IMAGES.lock().unwrap();
-        if let Some(hq_image) = HqImage::find_loaded(image_addr, &hq_images) {
-            upload_hq_image(hq_image, texture_id);
-        }
+fn get_target(surface_addr: SurfaceAddr) -> Option<Target> {
+    if bitmap_underlays_surface() == Some(surface_addr) {
+        BACKGROUND
+            .lock()
+            .unwrap()
+            .is_some()
+            .then_some(Target::Background)
+    } else {
+        OVERLAYS
+            .lock()
+            .unwrap()
+            .get(&surface_addr)
+            .cloned()
+            .map(Target::Image)
     }
 }
 
-fn upload_hq_image(hq_image: &HqImage, texture_id: u32) {
-    let hq_image_data: *const [u8] = hq_image.buffer.as_ref();
+fn with_target_hq_image<F: Fn(&HqImage)>(f: F) {
+    let background = BACKGROUND.lock().unwrap();
+    let hq_images = HQ_IMAGES.lock().unwrap();
+    let hq_image = match TARGET.lock().unwrap().as_ref() {
+        Some(Target::Background) => background.as_ref(),
+        Some(Target::Image(image_addr)) => HqImage::find_loaded(*image_addr, &hq_images),
+        _ => None,
+    };
+    if let Some(hq_image) = hq_image {
+        f(hq_image)
+    }
+}
 
-    unsafe {
-        gl::pixel_storei(gl::UNPACK_ALIGNMENT, 1);
-        gl::bind_texture(gl::TEXTURE_2D, texture_id);
-        gl::pixel_storei(gl::UNPACK_ROW_LENGTH, hq_image.width as gl::Int);
+extern "stdcall" fn hq_tex_image_2d(
+    _target: gl::Enum,
+    _level: gl::Int,
+    _internalformat: gl::Int,
+    _width: gl::Sizei,
+    _height: gl::Sizei,
+    _border: gl::Int,
+    _format: gl::Enum,
+    _typ: gl::Enum,
+    _data: *const c_void,
+) {
+    with_target_hq_image(|hq_image| unsafe {
         gl::tex_image_2d(
             gl::TEXTURE_2D,
             0,
@@ -337,9 +367,19 @@ fn upload_hq_image(hq_image: &HqImage, texture_id: u32) {
             0,
             gl::RGBA,
             gl::UNSIGNED_BYTE,
-            hq_image_data as *const c_void,
-        );
-    }
+            hq_image.buffer.as_ptr() as *const _,
+        )
+    })
+}
+
+extern "stdcall" fn hq_pixel_storei(pname: gl::Enum, param: gl::Int) {
+    with_target_hq_image(|hq_image| unsafe {
+        if pname == gl::UNPACK_ROW_LENGTH {
+            gl::pixel_storei(gl::UNPACK_ROW_LENGTH, hq_image.width as gl::Int);
+        } else {
+            gl::pixel_storei(pname, param);
+        }
+    })
 }
 
 /// Allocate a new surface (texture) of a given width/height
