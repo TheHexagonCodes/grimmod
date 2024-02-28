@@ -13,14 +13,14 @@ use crate::grim;
 #[derive(Clone, Copy, Default, Hash, Eq, PartialEq)]
 pub struct ImageContainerAddr(usize);
 
-#[derive(Clone, Copy, Default, Hash, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
 pub struct ImageAddr(usize);
 
-#[derive(Clone, Copy, Default, Hash, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
 pub struct SurfaceAddr(usize);
 
-pub static DECOMPRESSED: Mutex<ImageAddr> = Mutex::new(ImageAddr(0));
-pub static OVERLAY: Mutex<ImageAddr> = Mutex::new(ImageAddr(0));
+pub static DECOMPRESSED: Mutex<Option<ImageAddr>> = Mutex::new(None);
+pub static OVERLAY: Mutex<Option<ImageAddr>> = Mutex::new(None);
 pub static BACKGROUND: Mutex<Option<HqImage>> = Mutex::new(None);
 
 lazy_static! {
@@ -152,15 +152,8 @@ fn bitmap_underlays_surface() -> Option<SurfaceAddr> {
     }
 }
 
-fn extract_mutex<T: Copy + Default + Eq>(mutex: &Mutex<T>) -> Option<T> {
-    let mut guard = mutex.lock().ok()?;
-    let result = if *guard == Default::default() {
-        None
-    } else {
-        Some(*guard)
-    };
-    *guard = Default::default();
-    result
+fn extract<T>(mutex: &Mutex<Option<T>>) -> Option<T> {
+    mutex.lock().ok()?.take()
 }
 
 /// Loads the contents of a BM file into an image container
@@ -207,7 +200,7 @@ pub extern "C" fn open_bm_image(
 pub extern "C" fn decompress_image(image: *const grim::Image) {
     // store the address of the last image decompressed
     // it will shortly be copied to the clean buffer and rendered
-    *DECOMPRESSED.lock().unwrap() = ImageAddr(image as usize);
+    *DECOMPRESSED.lock().unwrap() = Some(ImageAddr(image as usize));
 
     unsafe { grim::decompress_image(image) }
 }
@@ -229,7 +222,7 @@ pub extern "C" fn copy_image(
     // an image being copied to the clean first buffer means it is a background (or about to draw
     // over the background) to be rendered
     if dst_image as usize == unsafe { grim::CLEAN_BUFFER.inner_addr() } {
-        let image_addr = extract_mutex(&DECOMPRESSED).unwrap_or(ImageAddr(src_image as usize));
+        let image_addr = extract(&DECOMPRESSED).unwrap_or(ImageAddr(src_image as usize));
         let hq_images = HQ_IMAGES.lock().unwrap();
         let hq_image = HqImage::find_loaded(image_addr, &hq_images);
         if x == 0 && y == 0 {
@@ -259,11 +252,11 @@ pub extern "C" fn copy_image(
     // then that indicates that it's an overlay
     // store this overlay temporarily to see what surface is allocated from it
     if dst_image as usize == unsafe { grim::BACK_BUFFER.addr() } {
-        let image_addr = extract_mutex(&DECOMPRESSED).unwrap_or(ImageAddr(src_image as usize));
+        let image_addr = extract(&DECOMPRESSED).unwrap_or(ImageAddr(src_image as usize));
         let hq_images = HQ_IMAGES.lock().unwrap();
         let hq_image = HqImage::find_loaded(image_addr, &hq_images);
         if hq_image.is_some() {
-            *OVERLAY.lock().unwrap() = image_addr;
+            *OVERLAY.lock().unwrap() = Some(image_addr);
         }
     }
 
@@ -359,7 +352,7 @@ pub extern "C" fn surface_allocate(
     let surface_addr = SurfaceAddr(surface as usize);
 
     // if a hq overlay was just loaded, store it with its new associated surface
-    if let Some(image_addr) = extract_mutex(&OVERLAY) {
+    if let Some(image_addr) = extract(&OVERLAY) {
         OVERLAYS.lock().unwrap().insert(surface_addr, image_addr);
     }
 
