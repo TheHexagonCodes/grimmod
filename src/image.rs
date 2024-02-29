@@ -260,7 +260,7 @@ pub extern "C" fn copy_image(
 
     // if an image with an associated hq image is being written directly to the back buffer
     // then that indicates that it's an overlay
-    // store this overlay temporarily to see what surface is allocated from it
+    // store this overlay temporarily to see what surface it is bound to
     if dst_image as usize == unsafe { grim::BACK_BUFFER.addr() } {
         let image_addr = extract(&DECOMPRESSED).unwrap_or(ImageAddr(src_image as usize));
         let hq_images = HQ_IMAGES.lock().unwrap();
@@ -402,6 +402,29 @@ pub extern "C" fn surface_allocate(
     surface
 }
 
+pub extern "C" fn surface_bind_existing(
+    surface: *mut grim::Surface,
+    image: *const grim::Image,
+    width: i32,
+    height: i32,
+    param_4: u32,
+    param_5: u32,
+    param_6: u32,
+    param_7: u32,
+    texture_id: gl::Uint,
+) {
+    let surface_addr = SurfaceAddr(surface as usize);
+    if let Some(overlay) = extract(&OVERLAY) {
+        OVERLAYS.lock().unwrap().insert(surface_addr, overlay);
+    }
+
+    unsafe {
+        grim::surface_bind_existing(
+            surface, image, width, height, param_4, param_5, param_6, param_7, texture_id,
+        );
+    }
+}
+
 pub extern "C" fn manage_resource(resource: *mut grim::Resource) -> c_int {
     let state = unsafe { (*resource).state };
     let image_container_addr = ImageContainerAddr(unsafe { (*resource).image_container as usize });
@@ -432,6 +455,10 @@ fn drawing_surface(draw: *const grim::Draw) -> Option<SurfaceAddr> {
     unsafe { draw.as_ref() }.map(|draw| SurfaceAddr(draw.surfaces[0] as usize))
 }
 
+fn drawing_sampler(draw: *const grim::Draw) -> Option<gl::Uint> {
+    unsafe { draw.as_ref() }.map(|draw| draw.samplers[0] as c_uint)
+}
+
 /// Sets the OpenGL state for the next draw call
 ///
 /// This is an overload for a native function that will be hooked
@@ -445,19 +472,19 @@ pub extern "C" fn setup_draw(draw: *mut grim::Draw, index_buffer: *const c_void)
 
     unsafe {
         grim::setup_draw(draw, index_buffer);
-
-        // for hq images, use a linear texture filter for better quality
-        let sampler = draw.as_ref().map(|draw| draw.samplers[0] as c_uint);
-        if hq && let Some(sampler) = sampler {
-            gl::sampler_parameteri(sampler, gl::TEXTURE_MIN_FILTER, gl::LINEAR as gl::Int);
-            gl::sampler_parameteri(sampler, gl::TEXTURE_MAG_FILTER, gl::LINEAR as gl::Int);
-        }
     }
 
-    // once an overlay has been drawn, remove it from the list of overlays
-    // if an overlay lasts for many frames, it will get reloaded every frame with a new surface
-    if hq && let Some(surface_addr) = drawing_surface(draw) {
-        OVERLAYS.lock().unwrap().remove(&surface_addr);
+    if hq && let (Some(surface), Some(sampler)) = (drawing_surface(draw), drawing_sampler(draw)) {
+        unsafe {
+            // for hq images, use a linear texture filter for better quality
+            gl::sampler_parameteri(sampler, gl::TEXTURE_MIN_FILTER, gl::LINEAR as gl::Int);
+            gl::sampler_parameteri(sampler, gl::TEXTURE_MAG_FILTER, gl::LINEAR as gl::Int);
+            gl::blend_func_separate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA, 1, 0);
+        }
+
+        // once an overlay has been drawn, remove it from the list of overlays
+        // if an overlay lasts for many frames, it will get reloaded every frame with a new surface
+        OVERLAYS.lock().unwrap().remove(&surface);
     }
 }
 

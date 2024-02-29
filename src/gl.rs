@@ -11,6 +11,8 @@ pub static mut tex_image_2d: IndirectFn<TexImage2D> = IndirectFn::new("gl_text_i
 pub static mut pixel_storei: IndirectFn<PixelStorei> = IndirectFn::new("gl_pixel_storei", 0x1713EC);
 pub static mut sampler_parameteri: IndirectFn<SamplerParameteri> =
     IndirectFn::new("gl_sampler_parameteri", 0x2E84064);
+pub static mut blend_func_separate: IndirectFn<BlendFuncSeparate> =
+    IndirectFn::new("gl_sampler_parameteri", 0x2E8360C);
 
 pub static mut sdl_set_swap_interval: IndirectFn<SdlSetSwapInterval> =
     IndirectFn::new("sdl_gl_set_swap_interval", 0x17147C);
@@ -36,6 +38,8 @@ pub type TexImage2D = extern "stdcall" fn(
 
 pub type PixelStorei = extern "stdcall" fn(pname: Enum, param: Int);
 pub type SamplerParameteri = extern "stdcall" fn(sampler: Uint, pname: Enum, param: Int);
+pub type BlendFuncSeparate =
+    extern "stdcall" fn(src_rgb: Enum, dst_rgb: Enum, src_alpha: Enum, dst_alpha: Enum);
 
 pub type SdlSetSwapInterval = extern "C" fn(interval: c_int) -> c_int;
 
@@ -46,4 +50,6 @@ pub const RGBA: Enum = 0x1908;
 pub const LINEAR: Enum = 0x2601;
 pub const TEXTURE_MAG_FILTER: Enum = 0x2800;
 pub const TEXTURE_MIN_FILTER: Enum = 0x2801;
+pub const SRC_ALPHA: Enum = 0x0302;
+pub const ONE_MINUS_SRC_ALPHA: Enum = 0x0303;
 pub const RGBA8: Enum = 0x8058;

@@ -16,6 +16,8 @@ pub static mut open_bm_image: DirectFn<OpenBmImage> = DirectFn::new("open_bm_ima
 pub static mut surface_upload: DirectFn<SurfaceUpload> = DirectFn::new("surface_upload", 0xE8A80);
 pub static mut surface_allocate: DirectFn<SurfaceAllocate> =
     DirectFn::new("surface_allocate", 0xECF70);
+pub static mut surface_bind_existing: DirectFn<SurfaceBindExisting> =
+    DirectFn::new("surface_bind_existing", 0x12ED20);
 pub static mut copy_image: DirectFn<CopyImage> = DirectFn::new("copy_image", 0xE5EC0);
 pub static mut decompress_image: DirectFn<DecompressImage> =
     DirectFn::new("decompress_image", 0x24D20);
@@ -43,6 +45,17 @@ pub type CopyImage =
 pub type SurfaceUpload = extern "C" fn(*mut Surface, *mut c_void);
 pub type SurfaceAllocate =
     extern "C" fn(width: c_int, height: c_int, format: c_uint, param_4: c_int) -> *const Surface;
+pub type SurfaceBindExisting = extern "C" fn(
+    surface: *mut Surface,
+    image: *const Image,
+    width: i32,
+    height: i32,
+    param_4: u32,
+    param_5: u32,
+    param_6: u32,
+    param_7: u32,
+    texture_id: gl::Uint,
+);
 pub type DecompressImage = extern "C" fn(*const Image);
 pub type ManageResource = extern "C" fn(*mut Resource) -> c_int;
 pub type SetupDraw = extern "C" fn(*mut Draw, *const c_void);
