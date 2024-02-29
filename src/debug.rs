@@ -1,6 +1,9 @@
 use lazy_static::lazy_static;
+use std::ffi::CString;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
+
+use crate::grim;
 
 const LOG_FILENAME: &str = "grimmod.log";
 
@@ -26,4 +29,13 @@ pub fn info<T: AsRef<str>>(message: T) -> Option<()> {
 
 pub fn error<T: AsRef<str>>(message: T) -> Option<()> {
     write(format!("[ERROR] {}", message.as_ref()))
+}
+
+#[allow(dead_code)]
+pub fn gl<T: AsRef<str>>(message: T) -> Option<()> {
+    let cmessage = CString::new(message.as_ref()).ok()?;
+    unsafe {
+        grim::marker(message.as_ref().len(), cmessage.as_ptr());
+    }
+    Some(())
 }

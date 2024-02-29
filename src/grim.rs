@@ -33,6 +33,9 @@ pub static mut BACK_BUFFER: Value<*const Image> = Value::new(0x31B4DA0);
 pub static mut BITMAP_UNDERLAYS_RENDER_PASS: Value<*const *const RenderPass> =
     Value::new(0x30861E4);
 
+pub static mut marker: DirectFn<extern "C" fn(len: usize, message: *const c_char)> =
+    DirectFn::new("marker", 0xEA1B0);
+
 pub type OpenFile = extern "C" fn(*mut c_char, *mut c_char) -> *mut c_void;
 pub type CloseFile = extern "C" fn(*mut c_void) -> c_int;
 pub type ReadFile = extern "C" fn(*mut c_void, *mut c_void, usize) -> usize;
