@@ -67,7 +67,11 @@ impl HqImageContainer {
             .filter_map(|image| image.as_ref())
             .collect();
         let filename = CStr::from_ptr(name).to_str().ok()?;
-        HqImageContainer::open(filename, image_container, images)
+        if filename.to_lowercase().ends_with(".bm") {
+            HqImageContainer::open(filename, image_container, images)
+        } else {
+            None
+        }
     }
 
     fn open(
