@@ -5,6 +5,7 @@ use std::ffi::{c_char, c_int, c_uint, CStr, CString};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
+use crate::animation;
 use crate::debug;
 use crate::file;
 use crate::gl;
@@ -82,8 +83,12 @@ impl HqImageContainer {
         images: Vec<&grim::Image>,
     ) -> Option<HqImageContainer> {
         let name = Path::new(bm_filename).file_stem()?.to_str()?;
-        let image_paths = HqImage::find_modded_paths(name)?;
-        let hq_images = HqImage::open_all(name, image_paths, images)?;
+        let hq_images = if let Some(hq_images) = HqImage::open_animation(name, images.clone()) {
+            hq_images
+        } else {
+            let image_paths = HqImage::find_modded_paths(name)?;
+            HqImage::open_all(name, image_paths, images)?
+        };
 
         Some(HqImageContainer {
             name: name.to_string(),
@@ -140,6 +145,29 @@ impl HqImage {
                     original_addr: ImageAddr(image as *const _ as usize),
                     has_alpha: png.color().has_alpha(),
                     buffer: png.to_rgba8().into_vec(),
+                })
+                .collect(),
+        )
+    }
+
+    fn open_animation(name: &str, images: Vec<&grim::Image>) -> Option<Vec<HqImage>> {
+        let path = file::find_modded(&format!("{}.mkv", name))?;
+        let frames = animation::open(path)?;
+
+        Some(
+            frames
+                .into_iter()
+                .zip(images)
+                .enumerate()
+                .map(|(i, (frame, image))| HqImage {
+                    name: format!("{} ({:02})", name, i),
+                    width: frame.width,
+                    height: frame.height,
+                    scale: frame.width / image.attributes.width as u32,
+                    path: "".to_string(),
+                    original_addr: ImageAddr(image as *const _ as usize),
+                    has_alpha: frame.has_alpha,
+                    buffer: frame.buffer,
                 })
                 .collect(),
         )

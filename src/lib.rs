@@ -1,5 +1,6 @@
 #![feature(fn_traits, let_chains, tuple_trait, unboxed_closures)]
 
+mod animation;
 mod debug;
 mod file;
 mod gl;
