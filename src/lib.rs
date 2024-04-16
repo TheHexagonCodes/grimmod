@@ -41,6 +41,7 @@ fn main() {
 
     unsafe {
         gl::sdl_set_swap_interval.hook(misc::sdl_gl_set_swap_interval as gl::SdlSetSwapInterval);
+        grim::draw_software_scene.hook(misc::draw_software_scene as grim::DrawSoftwareScene);
     }
 }
 

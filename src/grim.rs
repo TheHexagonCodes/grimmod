@@ -25,6 +25,8 @@ pub static mut manage_resource: DirectFn<ManageResource> =
     DirectFn::new("manage_resource", 0x2B340);
 pub static mut setup_draw: DirectFn<SetupDraw> = DirectFn::new("setup_draw", 0xF3540);
 pub static mut compile_shader: DirectFn<CompileShader> = DirectFn::new("compile_shader", 0xF2000);
+pub static mut draw_software_scene: DirectFn<DrawSoftwareScene> =
+    DirectFn::new("draw_software_scene", 0xF91C0);
 
 // buffers used for backgrounds and overlays
 pub static mut CLEAN_BUFFER: Value<*const *const Image> = Value::new(0x1691C7C);
@@ -32,6 +34,7 @@ pub static mut BACK_BUFFER: Value<*const Image> = Value::new(0x31B4DA0);
 // backgrounds' render pass data
 pub static mut BITMAP_UNDERLAYS_RENDER_PASS: Value<*const *const RenderPass> =
     Value::new(0x30861E4);
+pub static mut RENDERING_MODE: Value<*const f32> = Value::new(0x2E81230);
 
 pub static mut marker: DirectFn<extern "C" fn(len: usize, message: *const c_char)> =
     DirectFn::new("marker", 0xEA1B0);
@@ -63,6 +66,8 @@ pub type DecompressImage = extern "C" fn(*const Image);
 pub type ManageResource = extern "C" fn(*mut Resource) -> c_int;
 pub type SetupDraw = extern "C" fn(*mut Draw, *const c_void);
 pub type CompileShader = extern "C" fn(name: *const c_char) -> *const Shader;
+pub type DrawSoftwareScene =
+    extern "C" fn(draw: *const Draw, software_surface: *const Surface, transition: f32);
 
 /// Everything associated with a render pass (background, z-buffer, shadows, etc.)
 ///
