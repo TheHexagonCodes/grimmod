@@ -52,6 +52,7 @@ pub struct HqImage {
     pub scale: u32,
     pub path: String,
     pub original_addr: ImageAddr,
+    pub has_alpha: bool,
     pub buffer: Vec<u8>,
 }
 
@@ -137,6 +138,7 @@ impl HqImage {
                     scale: png.width() / image.attributes.width as u32,
                     path: path.display().to_string(),
                     original_addr: ImageAddr(image as *const _ as usize),
+                    has_alpha: png.color().has_alpha(),
                     buffer: png.to_rgba8().into_vec(),
                 })
                 .collect(),
@@ -263,12 +265,38 @@ pub extern "C" fn copy_image(
                 let y = (y * frame.scale) as usize;
                 let width = frame.width as usize;
                 let bytes_width = width * bytes_per_pixel;
-                for i in 0..frame.height as usize {
-                    let src_start = i * width * 3;
-                    let src_slice = &frame.buffer[src_start..src_start + bytes_width];
-                    let dst_start = (background.width as usize * (y + i) + x) * bytes_per_pixel;
-                    let dst_slice = &mut background.buffer[dst_start..dst_start + bytes_width];
-                    dst_slice.copy_from_slice(src_slice);
+                if !frame.has_alpha {
+                    for i in 0..frame.height as usize {
+                        let src_start = i * bytes_width;
+                        let src_slice = &frame.buffer[src_start..src_start + bytes_width];
+                        let dst_start = (background.width as usize * (y + i) + x) * bytes_per_pixel;
+                        let dst_slice = &mut background.buffer[dst_start..dst_start + bytes_width];
+                        dst_slice.copy_from_slice(src_slice);
+                    }
+                } else {
+                    for i in 0..frame.height as usize {
+                        for j in 0..width {
+                            let dst_start =
+                                (background.width as usize * (y + i) + (x + j)) * bytes_per_pixel;
+                            let dst_pixel = (
+                                background.buffer[dst_start],
+                                background.buffer[dst_start + 1],
+                                background.buffer[dst_start + 2],
+                                background.buffer[dst_start + 3],
+                            );
+                            let src_start = (width * i + j) * bytes_per_pixel;
+                            let src_pixel = (
+                                frame.buffer[src_start],
+                                frame.buffer[src_start + 1],
+                                frame.buffer[src_start + 2],
+                                frame.buffer[src_start + 3],
+                            );
+                            let (r, g, b) = blend_pixels(dst_pixel, src_pixel);
+                            background.buffer[dst_start] = r;
+                            background.buffer[dst_start + 1] = g;
+                            background.buffer[dst_start + 2] = b;
+                        }
+                    }
                 }
             }
         } else if let Some(original_background_addr) = extract(&ORIGINAL_BG) {
@@ -301,6 +329,17 @@ pub extern "C" fn copy_image(
             param_8,
         )
     }
+}
+
+fn blend_pixels(background: (u8, u8, u8, u8), foreground: (u8, u8, u8, u8)) -> (u8, u8, u8) {
+    let (br, bg, bb, _) = background;
+    let (fr, fg, fb, fa) = foreground;
+
+    let r = (fr as u16 * fa as u16 + br as u16 * (255 - fa) as u16) / 255;
+    let g = (fg as u16 * fa as u16 + bg as u16 * (255 - fa) as u16) / 255;
+    let b = (fb as u16 * fa as u16 + bb as u16 * (255 - fa) as u16) / 255;
+
+    (r as u8, g as u8, b as u8)
 }
 
 /// Prepare a surface (aka texture) for uploading to the GPU or upload it now
