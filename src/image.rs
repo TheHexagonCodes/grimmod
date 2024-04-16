@@ -298,7 +298,12 @@ pub extern "C" fn copy_image(
 /// This is an overload for a native function that will be hooked
 pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c_void) {
     let surface_addr = SurfaceAddr(surface as usize);
-    let target = get_target(surface_addr);
+    let is_paused = unsafe { grim::is_paused().as_bool() };
+    let target = if !is_paused {
+        get_target(surface_addr)
+    } else {
+        None
+    };
 
     if target.is_none() {
         return unsafe {

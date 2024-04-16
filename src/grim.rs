@@ -1,6 +1,7 @@
 #![allow(non_upper_case_globals)]
 
 use std::ffi::{c_char, c_int, c_uint, c_void, CStr};
+use windows::Win32::Foundation::BOOL;
 
 use crate::gl;
 use crate::process::{DirectFn, Value};
@@ -38,6 +39,8 @@ pub static mut RENDERING_MODE: Value<*const f32> = Value::new(0x2E81230);
 
 pub static mut marker: DirectFn<extern "C" fn(len: usize, message: *const c_char)> =
     DirectFn::new("marker", 0xEA1B0);
+
+pub static mut is_paused: DirectFn<extern "C" fn() -> BOOL> = DirectFn::new("is_paused", 0x23590);
 
 pub type OpenFile = extern "C" fn(*mut c_char, *mut c_char) -> *mut c_void;
 pub type CloseFile = extern "C" fn(*mut c_void) -> c_int;
