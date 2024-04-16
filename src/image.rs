@@ -23,6 +23,7 @@ pub static DECOMPRESSED: Mutex<Option<ImageAddr>> = Mutex::new(None);
 pub static OVERLAY: Mutex<Option<ImageAddr>> = Mutex::new(None);
 pub static BACKGROUND: Mutex<Option<HqImage>> = Mutex::new(None);
 pub static TARGET: Mutex<Option<Target>> = Mutex::new(None);
+pub static ORIGINAL_BG: Mutex<Option<ImageAddr>> = Mutex::new(None);
 
 lazy_static! {
     pub static ref HQ_IMAGES: Mutex<Vec<HqImageContainer>> = Mutex::new(Vec::new());
@@ -241,6 +242,7 @@ pub extern "C" fn copy_image(
         let hq_image = HqImage::find_loaded(image_addr, &hq_images);
         if x == 0 && y == 0 {
             *BACKGROUND.lock().unwrap() = hq_image.cloned();
+            *ORIGINAL_BG.lock().unwrap() = hq_image.map(|hq_image| hq_image.original_addr);
         } else if let Some(frame) = hq_image {
             let mut background = BACKGROUND.lock().unwrap();
             if let Some(background) = background.as_mut()
@@ -259,6 +261,9 @@ pub extern "C" fn copy_image(
                     dst_slice.copy_from_slice(src_slice);
                 }
             }
+        } else if let Some(original_background_addr) = extract(&ORIGINAL_BG) {
+            let hq_image = HqImage::find_loaded(original_background_addr, &hq_images);
+            *BACKGROUND.lock().unwrap() = hq_image.cloned();
         }
     }
 
