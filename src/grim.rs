@@ -30,6 +30,7 @@ pub static mut draw_software_scene: DirectFn<DrawSoftwareScene> =
     DirectFn::new("draw_software_scene", 0xF91C0);
 
 // buffers used for backgrounds and overlays
+pub static mut DECOMPRESSION_BUFFER: Value<*const Image> = Value::new(0x1691C78);
 pub static mut CLEAN_BUFFER: Value<*const Image> = Value::new(0x1691C7C);
 pub static mut BACK_BUFFER: Value<Image> = Value::new(0x31B4DA0);
 // backgrounds' render pass data

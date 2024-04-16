@@ -277,9 +277,15 @@ pub extern "C" fn copy_image(
     // an image being copied to the clean first buffer means it is a background (or about to draw
     // over the background) to be rendered
     if dst_image as usize == unsafe { grim::CLEAN_BUFFER.inner_addr() } {
-        let image_addr = extract(&DECOMPRESSED).unwrap_or(ImageAddr(src_image as usize));
         let hq_images = HQ_IMAGES.lock().unwrap();
-        let hq_image = HqImage::find_loaded(image_addr, &hq_images);
+        let image_addr = if src_image as usize == unsafe { grim::DECOMPRESSION_BUFFER.inner_addr() }
+        {
+            extract(&DECOMPRESSED)
+        } else {
+            Some(ImageAddr(src_image as usize))
+        };
+        let hq_image =
+            image_addr.and_then(|image_addr| HqImage::find_loaded(image_addr, &hq_images));
         if x == 0 && y == 0 {
             *BACKGROUND.lock().unwrap() = hq_image.cloned();
             *ORIGINAL_BG.lock().unwrap() = hq_image.map(|hq_image| hq_image.original_addr);
