@@ -297,19 +297,19 @@ impl<T> Value<T> {
     }
 }
 
-impl<T> Value<*const T> {
+impl<T> Value<T> {
     pub unsafe fn as_ref<'a>(&self) -> Option<&'a T> {
         as_ref::<T>(self.addr())
     }
 }
 
-impl<T: Clone + Default> Value<*const T> {
+impl<T: Clone + Default> Value<T> {
     pub unsafe fn get(&self) -> T {
         self.as_ref().cloned().unwrap_or_default()
     }
 }
 
-impl<T> Value<*const *const T> {
+impl<T> Value<*const T> {
     pub unsafe fn inner_addr(&self) -> usize {
         read::<usize>(self.addr())
     }

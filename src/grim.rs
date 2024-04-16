@@ -30,12 +30,11 @@ pub static mut draw_software_scene: DirectFn<DrawSoftwareScene> =
     DirectFn::new("draw_software_scene", 0xF91C0);
 
 // buffers used for backgrounds and overlays
-pub static mut CLEAN_BUFFER: Value<*const *const Image> = Value::new(0x1691C7C);
-pub static mut BACK_BUFFER: Value<*const Image> = Value::new(0x31B4DA0);
+pub static mut CLEAN_BUFFER: Value<*const Image> = Value::new(0x1691C7C);
+pub static mut BACK_BUFFER: Value<Image> = Value::new(0x31B4DA0);
 // backgrounds' render pass data
-pub static mut BITMAP_UNDERLAYS_RENDER_PASS: Value<*const *const RenderPass> =
-    Value::new(0x30861E4);
-pub static mut RENDERING_MODE: Value<*const f32> = Value::new(0x2E81230);
+pub static mut BITMAP_UNDERLAYS_RENDER_PASS: Value<*const RenderPass> = Value::new(0x30861E4);
+pub static mut RENDERING_MODE: Value<f32> = Value::new(0x2E81230);
 
 pub static mut marker: DirectFn<extern "C" fn(len: usize, message: *const c_char)> =
     DirectFn::new("marker", 0xEA1B0);
