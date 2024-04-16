@@ -106,6 +106,16 @@ impl HqImage {
         paths: Vec<PathBuf>,
         images: Vec<&grim::Image>,
     ) -> Option<Vec<HqImage>> {
+        if paths.len() != images.len() {
+            debug::error(format!(
+                "Could not open {} image: Expected {} frames, found {}",
+                name,
+                images.len(),
+                paths.len()
+            ));
+            return None;
+        }
+
         let try_pngs: Result<Vec<_>, _> = paths.iter().map(image::open).collect();
         let pngs = match try_pngs {
             Ok(pngs) => Some(pngs),
