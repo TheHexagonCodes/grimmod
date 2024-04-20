@@ -1,6 +1,6 @@
 #![allow(non_upper_case_globals)]
 
-use std::ffi::{c_int, c_uint, c_void};
+use std::ffi::{c_char, c_int, c_uint, c_void};
 
 use crate::process::IndirectFn;
 
@@ -16,6 +16,11 @@ pub static mut blend_func_separate: IndirectFn<BlendFuncSeparate> =
 
 pub static mut sdl_set_swap_interval: IndirectFn<SdlSetSwapInterval> =
     IndirectFn::new("sdl_gl_set_swap_interval", 0x17147C);
+
+pub static mut sdl_create_window: IndirectFn<SdlCreateWindow> =
+    IndirectFn::new("sdl_create_window", 0x1714F0);
+
+pub const SDL_WINDOW_ALLOW_HIGHDPI: u32 = 0x00002000;
 
 pub type Uint = c_uint;
 pub type Int = c_int;
@@ -42,6 +47,14 @@ pub type BlendFuncSeparate =
     extern "stdcall" fn(src_rgb: Enum, dst_rgb: Enum, src_alpha: Enum, dst_alpha: Enum);
 
 pub type SdlSetSwapInterval = extern "C" fn(interval: c_int) -> c_int;
+pub type SdlCreateWindow = extern "C" fn(
+    title: *const c_char,
+    x: c_int,
+    y: c_int,
+    w: c_int,
+    h: c_int,
+    flags: u32,
+) -> *mut c_void;
 
 pub const UNPACK_ROW_LENGTH: Enum = 0x0CF2;
 pub const TEXTURE_2D: Enum = 0x0DE1;
