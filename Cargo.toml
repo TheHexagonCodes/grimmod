@@ -11,6 +11,7 @@ retour = "0.3.1"
 glob = "0.3.1"
 image = "0.24.7"
 lazy_static = "1.4.0"
+paste = "1.0.14"
 
 libvpx-native-sys = "5.0.13"
 webm-iterable = "0.6.2"
@@ -23,6 +24,7 @@ features = [
     "Win32_System_LibraryLoader",
     "Win32_System_Memory",
     "Win32_System_ProcessStatus",
+    "Win32_System_SystemInformation",
     "Win32_System_SystemServices",
     "Win32_System_Threading",
 ]

@@ -8,9 +8,11 @@ mod grim;
 mod image;
 mod misc;
 mod process;
+mod proxy;
 
 use std::ffi::c_void;
-use windows::Win32::Foundation::BOOL;
+use windows::Win32::Foundation::{BOOL, HMODULE};
+use windows::Win32::System::LibraryLoader::DisableThreadLibraryCalls;
 use windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
 
 fn main() {
@@ -48,11 +50,15 @@ fn main() {
 
 #[no_mangle]
 pub extern "system" fn DllMain(
-    _hinstance: usize,
+    hinstance: HMODULE,
     fdw_reason: u32,
     _lp_reserved: *mut c_void,
 ) -> BOOL {
     if fdw_reason == DLL_PROCESS_ATTACH {
+        unsafe {
+            let _ = DisableThreadLibraryCalls(hinstance);
+            proxy::attach();
+        }
         main();
     }
     BOOL(1)
