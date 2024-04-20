@@ -19,10 +19,15 @@ pub fn open<P: AsRef<Path>>(path: P) -> Option<Vec<Frame>> {
 
     unsafe {
         let mut codec = std::mem::zeroed();
+        let config = vpx_sys::vpx_codec_dec_cfg {
+            threads: 4,
+            w: 0,
+            h: 0,
+        };
         let init_result = vpx_sys::vpx_codec_dec_init_ver(
             &mut codec,
             vpx_sys::vpx_codec_vp9_dx(),
-            std::ptr::null(),
+            &config,
             0,
             vpx_sys::VPX_DECODER_ABI_VERSION as i32,
         );
