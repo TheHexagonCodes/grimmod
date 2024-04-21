@@ -72,41 +72,54 @@ pub type CompileShader = extern "C" fn(name: *const c_char) -> *const Shader;
 pub type DrawSoftwareScene =
     extern "C" fn(draw: *const Draw, software_surface: *const Surface, transition: f32);
 
-/// Everything associated with a render pass (background, z-buffer, shadows, etc.)
-///
-/// This struct actually contains some kind of vector but it's not necessary to
-/// properly model it yet.
+/// LLVM's libc++ std::vector
+#[repr(C)]
+pub struct Vector<T> {
+    pub start: *mut T,
+    pub end: *mut T,
+    pub capacity_end: *mut T,
+    phantom: std::marker::PhantomData<T>,
+}
+
+impl<T: Sized> Vector<T> {
+    pub unsafe fn data(&self) -> &[T] {
+        std::slice::from_raw_parts(self.start, self.len())
+    }
+
+    pub fn len(&self) -> usize {
+        if self.start.is_null() {
+            0
+        } else {
+            let span = self.end as usize - self.start as usize;
+            1 + (span / std::mem::size_of::<T>())
+        }
+    }
+}
+
+/// A named render pass with all its associated entities
 #[repr(C)]
 pub struct RenderPass {
     pub name: *const c_char,
-    pub data: *const RenderPassData,
+    pub entities: Vector<RenderPassEntity>,
     pub field_3: *const c_void,
-    pub field_4: *const c_void,
 }
 
-/// Data associated with a render pass
-///
-/// The exact structure, size, and purpose of this struct is not fully understood
-/// but only surface is required now.
+/// An entity that will be drawn when associated with a render pass
 #[repr(C)]
-pub struct RenderPassData {
+pub struct RenderPassEntity {
     pub field_1: u32,
     pub shader_pipeline: *const c_void,
     pub field_3: u32,
     pub field_4: *const c_void,
 
-    pub field_5: *const c_void,
-    pub field_6: u32,
-    pub field_7: *const c_void,
-    pub field_8: *const c_void,
-
-    pub field_9: u32,
-    pub field_10: u32,
-    pub field_11: u32,
-    pub field_12: u32,
+    pub fields_5_12: [u32; 8],
 
     pub field_13: u32,
     pub surface: *const Surface,
+    pub field_15: u32,
+    pub field_16: u32,
+
+    pub fields_17_31: [u32; 15],
 }
 
 /// Data used to setup the next draw call

@@ -201,7 +201,8 @@ impl HqImage {
 fn bitmap_underlays_surface() -> Option<SurfaceAddr> {
     unsafe {
         let render_pass = grim::BITMAP_UNDERLAYS_RENDER_PASS.inner_ref();
-        let render_pass_data = render_pass.and_then(|render_pass| render_pass.data.as_ref());
+        let render_pass_data =
+            render_pass.and_then(|render_pass| render_pass.entities.data().get(0));
         let surface = render_pass_data.map(|render_pass_data| render_pass_data.surface as usize);
         surface.map(SurfaceAddr)
     }
