@@ -344,11 +344,17 @@ pub extern "C" fn copy_image(
     // then that indicates that it's an overlay
     // store this overlay temporarily to see what surface it is bound to
     if dst_image as usize == unsafe { grim::BACK_BUFFER.addr() } {
-        let image_addr = extract(&DECOMPRESSED).unwrap_or(ImageAddr(src_image as usize));
+        let image_addr = if src_image as usize == unsafe { grim::DECOMPRESSION_BUFFER.inner_addr() }
+        {
+            extract(&DECOMPRESSED)
+        } else {
+            Some(ImageAddr(src_image as usize))
+        };
         let hq_images = HQ_IMAGES.lock().unwrap();
-        let hq_image = HqImage::find_loaded(image_addr, &hq_images);
-        if hq_image.is_some() {
-            *OVERLAY.lock().unwrap() = Some(image_addr);
+        let hq_image =
+            image_addr.and_then(|image_addr| HqImage::find_loaded(image_addr, &hq_images));
+        if let Some(hq_image) = hq_image {
+            *OVERLAY.lock().unwrap() = Some(hq_image.original_addr);
         }
     }
 
