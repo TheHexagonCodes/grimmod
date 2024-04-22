@@ -46,6 +46,9 @@ fn main() {
         gl::sdl_create_window.hook(misc::sdl_create_window as gl::SdlCreateWindow);
         gl::sdl_set_swap_interval.hook(misc::sdl_gl_set_swap_interval as gl::SdlSetSwapInterval);
         grim::draw_software_scene.hook(misc::draw_software_scene as grim::DrawSoftwareScene);
+        gl::sdl_get_display_bounds.hook(misc::sdl_get_display_bounds as gl::SdlGetDisplayBounds);
+        gl::sdl_get_current_display_mode
+            .hook(misc::sdl_get_current_display_mode as gl::SdlGetCurrentDisplayMode);
     }
 }
 

@@ -38,6 +38,7 @@ pub static mut BITMAP_UNDERLAYS_RENDER_PASS: Value<*const RenderPass> = Value::n
 pub static mut VIRTUAL_DEPTH_RENDER_PASS: Value<*const RenderPass> = Value::new(0x3086304);
 pub static mut RENDERING_MODE: Value<f32> = Value::new(0x2E81230);
 pub static mut DEFERRED_RENDERER_ACTIVE: Value<BOOL> = Value::new(0x2E83488);
+pub static mut GAME_WINDOW: Value<*const c_void> = Value::new(0x2E81244);
 
 pub static mut marker: DirectFn<extern "C" fn(len: usize, message: *const c_char)> =
     DirectFn::new("marker", 0xEA1B0);

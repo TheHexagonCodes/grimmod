@@ -303,9 +303,9 @@ impl<T> Value<T> {
     }
 }
 
-impl<T: Clone + Default> Value<T> {
+impl<T: Clone> Value<T> {
     pub unsafe fn get(&self) -> T {
-        self.as_ref().cloned().unwrap_or_default()
+        self.as_ref().cloned().unwrap()
     }
 }
 
