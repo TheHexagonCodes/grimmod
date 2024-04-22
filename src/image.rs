@@ -388,8 +388,13 @@ fn blend_pixels(background: (u8, u8, u8, u8), foreground: (u8, u8, u8, u8)) -> (
 /// This is an overload for a native function that will be hooked
 pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c_void) {
     let surface_addr = SurfaceAddr(surface as usize);
+    // overriding textures does not work and leads to bugs in in the following situations:
+    // 1. The modern deferred renderer is off
+    // 2. The game is paused
+    // so exit early in those cases
+    let deferred_renderer_active = unsafe { grim::DEFERRED_RENDERER_ACTIVE.get().as_bool() };
     let is_paused = unsafe { grim::is_paused().as_bool() };
-    let target = if !is_paused {
+    let target = if deferred_renderer_active && !is_paused {
         get_target(surface_addr)
     } else {
         None

@@ -36,6 +36,7 @@ pub static mut BACK_BUFFER: Value<Image> = Value::new(0x31B4DA0);
 // backgrounds' render pass data
 pub static mut BITMAP_UNDERLAYS_RENDER_PASS: Value<*const RenderPass> = Value::new(0x30861E4);
 pub static mut RENDERING_MODE: Value<f32> = Value::new(0x2E81230);
+pub static mut DEFERRED_RENDERER_ACTIVE: Value<BOOL> = Value::new(0x2E83488);
 
 pub static mut marker: DirectFn<extern "C" fn(len: usize, message: *const c_char)> =
     DirectFn::new("marker", 0xEA1B0);
