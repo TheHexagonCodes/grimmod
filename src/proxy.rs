@@ -39,8 +39,7 @@ proxy!(fn gluTessCallback(tess: *mut c_void, which: c_uint, cb: *mut c_void));
 proxy!(fn gluTessVertex(tess: *mut c_void, location: *mut f64, data: *mut c_void));
 
 pub unsafe fn attach() -> Option<()> {
-    let dll_name = CString::new(system_glu32_path()).ok()?;
-    let glu32 = LoadLibraryA(PCSTR::from_raw(dll_name.as_ptr() as *const u8)).ok()?;
+    let glu32 = load_library(&system_glu32_path())?;
 
     GLU_ERROR_STRING = transmute(get_proc(glu32, "gluErrorString"));
     GLU_TESS_BEGIN_CONTOUR = transmute(get_proc(glu32, "gluTessBeginContour"));
@@ -57,15 +56,20 @@ pub unsafe fn attach() -> Option<()> {
     Some(())
 }
 
-unsafe fn system_glu32_path() -> String {
+pub fn load_library(dll_path: &str) -> Option<HMODULE> {
+    let dll_path = CString::new(dll_path).ok()?;
+    unsafe { LoadLibraryA(PCSTR::from_raw(dll_path.as_ptr() as *const u8)).ok() }
+}
+
+pub fn system_glu32_path() -> String {
     let mut buffer = vec![0u8; MAX_PATH as usize];
-    let length = GetSystemDirectoryA(Some(&mut buffer));
+    let length = unsafe { GetSystemDirectoryA(Some(&mut buffer)) };
     let mut path = String::from_utf8_lossy(&buffer[..length as usize]).to_string();
     path.push_str("\\glu32.dll");
     path
 }
 
-unsafe fn get_proc(dll: HMODULE, proc: &str) -> Option<unsafe extern "system" fn() -> isize> {
+pub fn get_proc(dll: HMODULE, proc: &str) -> Option<unsafe extern "system" fn() -> isize> {
     let proc = CString::new(proc).ok()?;
-    GetProcAddress(dll, PCSTR::from_raw(proc.as_ptr() as *const u8))
+    unsafe { GetProcAddress(dll, PCSTR::from_raw(proc.as_ptr() as *const u8)) }
 }
