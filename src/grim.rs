@@ -35,6 +35,7 @@ pub static mut CLEAN_BUFFER: Value<*const Image> = Value::new(0x1691C7C);
 pub static mut BACK_BUFFER: Value<Image> = Value::new(0x31B4DA0);
 // backgrounds' render pass data
 pub static mut BITMAP_UNDERLAYS_RENDER_PASS: Value<*const RenderPass> = Value::new(0x30861E4);
+pub static mut VIRTUAL_DEPTH_RENDER_PASS: Value<*const RenderPass> = Value::new(0x3086304);
 pub static mut RENDERING_MODE: Value<f32> = Value::new(0x2E81230);
 pub static mut DEFERRED_RENDERER_ACTIVE: Value<BOOL> = Value::new(0x2E83488);
 

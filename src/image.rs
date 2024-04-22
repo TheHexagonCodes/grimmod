@@ -202,7 +202,17 @@ fn bitmap_underlays_surface() -> Option<SurfaceAddr> {
     unsafe {
         let render_pass = grim::BITMAP_UNDERLAYS_RENDER_PASS.inner_ref();
         let render_pass_data =
-            render_pass.and_then(|render_pass| render_pass.entities.data().get(0));
+            render_pass.and_then(|render_pass| render_pass.entities.data().first());
+        let surface = render_pass_data.map(|render_pass_data| render_pass_data.surface as usize);
+        surface.map(SurfaceAddr)
+    }
+}
+
+fn virtual_depth_surface() -> Option<SurfaceAddr> {
+    unsafe {
+        let render_pass = grim::VIRTUAL_DEPTH_RENDER_PASS.inner_ref();
+        let render_pass_data =
+            render_pass.and_then(|render_pass| render_pass.entities.data().first());
         let surface = render_pass_data.map(|render_pass_data| render_pass_data.surface as usize);
         surface.map(SurfaceAddr)
     }
@@ -391,10 +401,12 @@ pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c
     // overriding textures does not work and leads to bugs in in the following situations:
     // 1. The modern deferred renderer is off
     // 2. The game is paused
+    // 3. It's the virtual depth's pass (hq surface can apparently get reused)
     // so exit early in those cases
     let deferred_renderer_active = unsafe { grim::DEFERRED_RENDERER_ACTIVE.get().as_bool() };
     let is_paused = unsafe { grim::is_paused().as_bool() };
-    let target = if deferred_renderer_active && !is_paused {
+    let is_virtual_depth_surface = virtual_depth_surface() == Some(surface_addr);
+    let target = if deferred_renderer_active && !is_paused && !is_virtual_depth_surface {
         get_target(surface_addr)
     } else {
         None
