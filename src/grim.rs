@@ -1,33 +1,86 @@
-#![allow(non_upper_case_globals)]
+#![allow(improper_ctypes, non_upper_case_globals)]
 
 use std::ffi::{c_char, c_int, c_uint, c_void, CStr};
 use windows::Win32::Foundation::BOOL;
 
+use crate::fns;
 use crate::gl;
-use crate::process::{DirectFn, Value};
+use crate::process::Value;
 
-// file operation functions that work with LAB packed files
-pub static mut open_file: DirectFn<OpenFile> = DirectFn::new("open_file", 0x1EF80);
-pub static mut close_file: DirectFn<CloseFile> = DirectFn::new("close_file", 0x1C870);
-pub static mut read_file: DirectFn<ReadFile> = DirectFn::new("read_file", 0x1E050);
-pub static mut read_all: DirectFn<ReadAll> = DirectFn::new("read_all", 0xE6700);
+fns! {
+    // file operation functions that work with LAB packed files
+    #[address(0x1EF80)]
+    extern "C" fn open_file(filename: *mut c_char, mode: *mut c_char) -> *mut c_void;
+    #[address(0x1C870)]
+    extern "C" fn close_file(file: *mut c_void) -> c_int;
+    #[address(0x1E050)]
+    extern "C" fn read_file(file: *mut c_void, dst: *mut c_void, size: usize) -> usize;
+    #[address(0xE6700)]
+    extern "C" fn read_all(dst: *mut *const c_void, size: *mut usize, filename: *const c_char);
 
-// functions for loading images and preparing textures
-pub static mut open_bm_image: DirectFn<OpenBmImage> = DirectFn::new("open_bm_image", 0xDADE0);
-pub static mut surface_upload: DirectFn<SurfaceUpload> = DirectFn::new("surface_upload", 0xE8A80);
-pub static mut surface_allocate: DirectFn<SurfaceAllocate> =
-    DirectFn::new("surface_allocate", 0xECF70);
-pub static mut surface_bind_existing: DirectFn<SurfaceBindExisting> =
-    DirectFn::new("surface_bind_existing", 0x12ED20);
-pub static mut copy_image: DirectFn<CopyImage> = DirectFn::new("copy_image", 0xE5EC0);
-pub static mut decompress_image: DirectFn<DecompressImage> =
-    DirectFn::new("decompress_image", 0x24D20);
-pub static mut manage_resource: DirectFn<ManageResource> =
-    DirectFn::new("manage_resource", 0x2B340);
-pub static mut setup_draw: DirectFn<SetupDraw> = DirectFn::new("setup_draw", 0xF3540);
-pub static mut compile_shader: DirectFn<CompileShader> = DirectFn::new("compile_shader", 0xF2000);
-pub static mut draw_software_scene: DirectFn<DrawSoftwareScene> =
-    DirectFn::new("draw_software_scene", 0xF91C0);
+    // reads and parses a bitmap (.bm/.zbm) image into unified image container
+    #[address(0xDADE0)]
+    extern "C" fn open_bm_image(
+        filename: *const c_char,
+        param_2: u32,
+        param_3: u32,
+    ) -> *mut ImageContainer;
+
+    #[address(0xE5EC0)]
+    extern "C" fn copy_image(
+        dst_image: *mut Image,
+        dst_surface: *mut c_void,
+        src_image: *mut Image,
+        src_surface: *mut c_void,
+        x: u32,
+        y: u32,
+        param_7: u32,
+        param_8: u32,
+    );
+    #[address(0x24D20)]
+    extern "C" fn decompress_image(image: *const Image);
+    #[address(0x2B340)]
+    extern "C" fn manage_resource(resource: *mut Resource) -> c_int;
+
+    #[address(0xE8A80)]
+    extern "C" fn surface_upload(surface: *mut Surface, image_data: *mut c_void);
+    #[address(0xECF70)]
+    extern "C" fn surface_allocate(
+        width: c_int,
+        height: c_int,
+        format: c_uint,
+        param_4: c_int
+    ) -> *const Surface;
+    #[address(0x12ED20)]
+    extern "C" fn surface_bind_existing(
+        surface: *mut Surface,
+        image: *const Image,
+        width: i32,
+        height: i32,
+        param_4: u32,
+        param_5: u32,
+        param_6: u32,
+        param_7: u32,
+        texture_id: gl::Uint,
+    );
+
+    #[address(0xF3540)]
+    extern "C" fn setup_draw(draw: *mut Draw, index_buffer: *const c_void);
+    #[address(0xF2000)]
+    extern "C" fn compile_shader(name: *const c_char) -> *const Shader;
+    #[address(0xF91C0)]
+    extern "C" fn draw_software_scene(
+        draw: *const Draw,
+        software_surface: *const Surface,
+        transition: f32
+    );
+
+    #[address(0x23590)]
+    extern "C" fn is_paused() -> BOOL;
+
+    #[address(0xEA1B0)]
+    extern "C" fn marker(len: usize, message: *const c_char);
+}
 
 // buffers used for backgrounds and overlays
 pub static mut DECOMPRESSION_BUFFER: Value<*const Image> = Value::new(0x1691C78);
@@ -39,41 +92,6 @@ pub static mut VIRTUAL_DEPTH_RENDER_PASS: Value<*const RenderPass> = Value::new(
 pub static mut RENDERING_MODE: Value<f32> = Value::new(0x2E81230);
 pub static mut DEFERRED_RENDERER_ACTIVE: Value<BOOL> = Value::new(0x2E83488);
 pub static mut GAME_WINDOW: Value<*const c_void> = Value::new(0x2E81244);
-
-pub static mut marker: DirectFn<extern "C" fn(len: usize, message: *const c_char)> =
-    DirectFn::new("marker", 0xEA1B0);
-
-pub static mut is_paused: DirectFn<extern "C" fn() -> BOOL> = DirectFn::new("is_paused", 0x23590);
-
-pub type OpenFile = extern "C" fn(*mut c_char, *mut c_char) -> *mut c_void;
-pub type CloseFile = extern "C" fn(*mut c_void) -> c_int;
-pub type ReadFile = extern "C" fn(*mut c_void, *mut c_void, usize) -> usize;
-pub type ReadAll =
-    extern "C" fn(dst: *mut *const c_void, size: *mut usize, filename: *const c_char);
-
-pub type OpenBmImage = extern "C" fn(*const c_char, u32, u32) -> *mut ImageContainer;
-pub type CopyImage =
-    extern "C" fn(*mut Image, *mut c_void, *mut Image, *mut c_void, u32, u32, u32, u32);
-pub type SurfaceUpload = extern "C" fn(*mut Surface, *mut c_void);
-pub type SurfaceAllocate =
-    extern "C" fn(width: c_int, height: c_int, format: c_uint, param_4: c_int) -> *const Surface;
-pub type SurfaceBindExisting = extern "C" fn(
-    surface: *mut Surface,
-    image: *const Image,
-    width: i32,
-    height: i32,
-    param_4: u32,
-    param_5: u32,
-    param_6: u32,
-    param_7: u32,
-    texture_id: gl::Uint,
-);
-pub type DecompressImage = extern "C" fn(*const Image);
-pub type ManageResource = extern "C" fn(*mut Resource) -> c_int;
-pub type SetupDraw = extern "C" fn(*mut Draw, *const c_void);
-pub type CompileShader = extern "C" fn(name: *const c_char) -> *const Shader;
-pub type DrawSoftwareScene =
-    extern "C" fn(draw: *const Draw, software_surface: *const Surface, transition: f32);
 
 /// LLVM's libc++ std::vector
 #[repr(C)]

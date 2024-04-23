@@ -428,7 +428,7 @@ pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c
 
     *TARGET.lock().unwrap() = target;
     unsafe {
-        gl::tex_image_2d.hook(hq_tex_image_2d as gl::TexImage2D);
+        gl::tex_image_2d.hook(hq_tex_image_2d as gl::TexImage2d);
         gl::pixel_storei.hook(hq_pixel_storei as gl::PixelStorei);
         grim::surface_upload(surface, std::ptr::null_mut());
         gl::pixel_storei.unhook();

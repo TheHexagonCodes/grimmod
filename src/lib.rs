@@ -6,6 +6,7 @@ mod file;
 mod gl;
 mod grim;
 mod image;
+mod macros;
 mod misc;
 mod process;
 mod proxy;
