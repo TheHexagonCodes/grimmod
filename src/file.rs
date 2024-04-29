@@ -23,13 +23,8 @@ extern "C" {
 
 /// Finds the path to a modded resource, if one exists
 pub fn find_modded(filename: &str) -> Option<PathBuf> {
-    let mut entries = glob(format!("./Mods/*/resources/{}", filename).as_ref()).unwrap();
+    let mut entries = glob(&format!("./Mods/*/resources/*/{}", filename.to_lowercase())).ok()?;
     entries.next().map(Result::unwrap)
-}
-
-pub fn find_all_modded(filename: &str) -> impl Iterator<Item = PathBuf> {
-    let entries = glob(format!("./Mods/*/resources/{}", filename).as_ref()).unwrap();
-    entries.filter_map(|entry| entry.ok())
 }
 
 /// Enhances the game's open file function, opening modded files if found

@@ -2,7 +2,7 @@ use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ffi::{c_char, c_int, c_uint, CStr, CString};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use crate::animation;
@@ -51,7 +51,6 @@ pub struct HqImage {
     pub width: u32,
     pub height: u32,
     pub scale: u32,
-    pub path: String,
     pub original_addr: ImageAddr,
     pub has_alpha: bool,
     pub buffer: Vec<u8>,
@@ -67,11 +66,15 @@ impl HqImageContainer {
         let image_refs = std::slice::from_raw_parts(image_container.images, n_images);
         let images: Vec<_> = image_refs
             .iter()
-            .filter_map(|image| image.as_ref())
+            .filter_map(|image| {
+                image
+                    .as_ref()
+                    .map(|image_ref| (image_ref, ImageAddr(*image as usize)))
+            })
             .collect();
         let filename = CStr::from_ptr(name).to_str().ok()?;
         if filename.to_lowercase().ends_with(".bm") {
-            HqImageContainer::open(filename, image_container, images)
+            HqImageContainer::open(filename, image_container, &images)
         } else {
             None
         }
@@ -80,15 +83,11 @@ impl HqImageContainer {
     fn open(
         bm_filename: &str,
         image_container: &grim::ImageContainer,
-        images: Vec<&grim::Image>,
+        images: &[(&grim::Image, ImageAddr)],
     ) -> Option<HqImageContainer> {
         let name = Path::new(bm_filename).file_stem()?.to_str()?;
-        let hq_images = if let Some(hq_images) = HqImage::open_animation(name, images.clone()) {
-            hq_images
-        } else {
-            let image_paths = HqImage::find_modded_paths(name)?;
-            HqImage::open_all(name, image_paths, images)?
-        };
+        let hq_images =
+            HqImage::open_image(name, images).or_else(|| HqImage::open_animation(name, images))?;
 
         Some(HqImageContainer {
             name: name.to_string(),
@@ -107,81 +106,44 @@ impl HqImageContainer {
 }
 
 impl HqImage {
-    fn open_all(
-        name: &str,
-        paths: Vec<PathBuf>,
-        images: Vec<&grim::Image>,
-    ) -> Option<Vec<HqImage>> {
-        if paths.len() != images.len() {
-            debug::error(format!(
-                "Could not open {} image: Expected {} frames, found {}",
-                name,
-                images.len(),
-                paths.len()
-            ));
-            return None;
-        }
+    fn open_image(name: &str, images: &[(&grim::Image, ImageAddr)]) -> Option<Vec<HqImage>> {
+        let path = file::find_modded(&format!("{}.png", name))?;
+        HqImage::check_frame_mismatch(name, images.len(), 1)?;
+        let (image, image_addr) = images.first()?;
+        let png = image::open(path.clone()).ok()?;
 
-        let try_pngs: Result<Vec<_>, _> = paths.iter().map(image::open).collect();
-        let pngs = match try_pngs {
-            Ok(pngs) => Some(pngs),
-            Err(error) => {
-                debug::error(format!("Could not open {} image: {}", name, error));
-                None
-            }
-        }?;
-
-        Some(
-            pngs.into_iter()
-                .zip(images)
-                .zip(paths)
-                .enumerate()
-                .map(|(i, ((png, image), path))| HqImage {
-                    name: format!("{} ({:02})", name, i),
-                    width: png.width(),
-                    height: png.height(),
-                    scale: png.width() / image.attributes.width as u32,
-                    path: path.display().to_string(),
-                    original_addr: ImageAddr(image as *const _ as usize),
-                    has_alpha: png.color().has_alpha(),
-                    buffer: png.to_rgba8().into_vec(),
-                })
-                .collect(),
-        )
+        Some(vec![HqImage {
+            name: name.to_string(),
+            width: png.width(),
+            height: png.height(),
+            scale: png.width() / image.attributes.width as u32,
+            original_addr: *image_addr,
+            has_alpha: png.color().has_alpha(),
+            buffer: png.to_rgba8().into_vec(),
+        }])
     }
 
-    fn open_animation(name: &str, images: Vec<&grim::Image>) -> Option<Vec<HqImage>> {
+    fn open_animation(name: &str, images: &[(&grim::Image, ImageAddr)]) -> Option<Vec<HqImage>> {
         let path = file::find_modded(&format!("{}.mkv", name))?;
         let frames = animation::open(path)?;
+        HqImage::check_frame_mismatch(name, images.len(), frames.len())?;
 
         Some(
             frames
                 .into_iter()
                 .zip(images)
                 .enumerate()
-                .map(|(i, (frame, image))| HqImage {
+                .map(|(i, (frame, (image, image_addr)))| HqImage {
                     name: format!("{} ({:02})", name, i),
                     width: frame.width,
                     height: frame.height,
                     scale: frame.width / image.attributes.width as u32,
-                    path: "".to_string(),
-                    original_addr: ImageAddr(image as *const _ as usize),
+                    original_addr: *image_addr,
                     has_alpha: frame.has_alpha,
                     buffer: frame.buffer,
                 })
                 .collect(),
         )
-    }
-
-    fn find_modded_paths(name: &str) -> Option<Vec<PathBuf>> {
-        let is_animated = file::find_modded(&format!("{}/01.png", name)).is_some();
-        let mut image_paths = if is_animated {
-            Some(file::find_all_modded(&format!("{}/*.png", name)).collect())
-        } else {
-            file::find_modded(&format!("{}.png", name)).map(|image| vec![image])
-        }?;
-        image_paths.sort();
-        Some(image_paths)
     }
 
     fn find_loaded<'a>(
@@ -194,6 +156,16 @@ impl HqImage {
                 .iter()
                 .find(|hq_image| hq_image.original_addr == original_addr)
         })
+    }
+
+    fn check_frame_mismatch(name: &str, original: usize, hq: usize) -> Option<()> {
+        if original != hq {
+            debug::error(format!(
+                "Could not open {} image: Expected {} frames, found {}",
+                name, original, hq
+            ));
+        }
+        (original == hq).then_some(())
     }
 }
 
