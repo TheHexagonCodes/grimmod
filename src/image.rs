@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ffi::{c_char, c_int, c_uint, CStr, CString};
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::thread;
 
 use crate::animation;
 use crate::debug;
@@ -38,23 +39,28 @@ pub enum Target {
     Image(ImageAddr),
 }
 
-#[derive(Clone)]
 pub struct HqImageContainer {
     pub name: String,
     pub original_addr: ImageContainerAddr,
     pub images: Vec<HqImage>,
 }
 
-#[derive(Clone)]
 pub struct HqImage {
     pub name: String,
     pub width: u32,
     pub height: u32,
     pub scale: u32,
     pub original_addr: ImageAddr,
-    pub has_alpha: bool,
-    pub buffer: Vec<u8>,
+    pub data: HqImageAsyncData,
 }
+
+pub enum HqImageState {
+    Loading,
+    Failed,
+    Loaded { buffer: Vec<u8>, has_alpha: bool },
+}
+
+pub type HqImageAsyncData = Arc<(Mutex<HqImageState>, Condvar)>;
 
 impl HqImageContainer {
     unsafe fn from_raw(
@@ -110,16 +116,29 @@ impl HqImage {
         let path = file::find_modded(&format!("{}.png", name))?;
         HqImage::check_frame_mismatch(name, images.len(), 1)?;
         let (image, image_addr) = images.first()?;
-        let png = image::open(path.clone()).ok()?;
+        let (width, height) = image::image_dimensions(&path).ok()?;
+        let data = Arc::new((Mutex::new(HqImageState::Loading), Condvar::new()));
+        let data_ref = Arc::clone(&data);
+
+        thread::spawn(move || {
+            if let Ok(png) = image::open(path) {
+                let has_alpha = png.color().has_alpha();
+                let buffer = png.to_rgba8().into_vec();
+                *data_ref.0.lock().unwrap() = HqImageState::Loaded { buffer, has_alpha };
+            } else {
+                *data_ref.0.lock().unwrap() = HqImageState::Failed;
+            }
+
+            data_ref.1.notify_all();
+        });
 
         Some(vec![HqImage {
             name: name.to_string(),
-            width: png.width(),
-            height: png.height(),
-            scale: png.width() / image.attributes.width as u32,
+            width,
+            height,
+            scale: width / image.attributes.width as u32,
             original_addr: *image_addr,
-            has_alpha: png.color().has_alpha(),
-            buffer: png.to_rgba8().into_vec(),
+            data,
         }])
     }
 
@@ -139,23 +158,57 @@ impl HqImage {
                     height: frame.height,
                     scale: frame.width / image.attributes.width as u32,
                     original_addr: *image_addr,
-                    has_alpha: frame.has_alpha,
-                    buffer: frame.buffer,
+                    data: Arc::new((
+                        Mutex::new(HqImageState::Loaded {
+                            has_alpha: frame.has_alpha,
+                            buffer: frame.buffer,
+                        }),
+                        Condvar::new(),
+                    )),
                 })
                 .collect(),
         )
     }
 
-    fn find_loaded<'a>(
+    fn map_loaded<F, R>(
         original_addr: ImageAddr,
-        hq_images: &'a MutexGuard<'a, Vec<HqImageContainer>>,
-    ) -> Option<&'a HqImage> {
-        hq_images.iter().find_map(|hq_image_container| {
+        hq_images: &mut MutexGuard<Vec<HqImageContainer>>,
+        f: F,
+    ) -> Option<R>
+    where
+        F: FnMut(&mut HqImage) -> Option<R>,
+    {
+        hq_images
+            .iter_mut()
+            .find_map(|hq_image_container| {
+                hq_image_container
+                    .images
+                    .iter_mut()
+                    .find(|hq_image| hq_image.original_addr == original_addr)
+            })
+            .and_then(f)
+    }
+
+    fn with_loaded_or_else<SF, NF, R>(
+        original_addr: ImageAddr,
+        hq_images: &mut MutexGuard<Vec<HqImageContainer>>,
+        mut some: SF,
+        mut none: NF,
+    ) -> R
+    where
+        SF: FnMut(&mut HqImage) -> R,
+        NF: FnMut(&mut MutexGuard<Vec<HqImageContainer>>) -> R,
+    {
+        let hq_image = hq_images.iter_mut().find_map(|hq_image_container| {
             hq_image_container
                 .images
-                .iter()
+                .iter_mut()
                 .find(|hq_image| hq_image.original_addr == original_addr)
-        })
+        });
+        match hq_image {
+            Some(hq_image) => some(hq_image),
+            None => none(hq_images),
+        }
     }
 
     fn check_frame_mismatch(name: &str, original: usize, hq: usize) -> Option<()> {
@@ -166,6 +219,43 @@ impl HqImage {
             ));
         }
         (original == hq).then_some(())
+    }
+
+    fn with_data<F, R>(&mut self, mut f: F) -> Option<R>
+    where
+        F: FnMut(&[u8], bool) -> R,
+    {
+        let mut state = self.data.0.lock().unwrap();
+        while matches!(*state, HqImageState::Loading) {
+            state = self.data.1.wait(state).unwrap();
+        }
+
+        match &*state {
+            HqImageState::Loaded { buffer, has_alpha } => Some(f(buffer, *has_alpha)),
+            _ => None,
+        }
+    }
+
+    fn wait_and_clone(&mut self) -> Option<HqImage> {
+        let name = self.name.clone();
+        let width = self.width;
+        let height = self.height;
+        let scale = self.scale;
+        let original_addr = self.original_addr;
+        self.with_data(|buffer, has_alpha| HqImage {
+            name: name.clone(),
+            width,
+            height,
+            scale,
+            original_addr,
+            data: Arc::new((
+                Mutex::new(HqImageState::Loaded {
+                    buffer: buffer.to_vec(),
+                    has_alpha,
+                }),
+                Condvar::new(),
+            )),
+        })
     }
 }
 
@@ -260,65 +350,46 @@ pub extern "C" fn copy_image(
     // an image being copied to the clean first buffer means it is a background (or about to draw
     // over the background) to be rendered
     if dst_image as usize == unsafe { grim::CLEAN_BUFFER.inner_addr() } {
-        let hq_images = HQ_IMAGES.lock().unwrap();
+        let mut hq_images = HQ_IMAGES.lock().unwrap();
         let image_addr = if src_image as usize == unsafe { grim::DECOMPRESSION_BUFFER.inner_addr() }
         {
             extract(&DECOMPRESSED)
         } else {
             Some(ImageAddr(src_image as usize))
         };
-        let hq_image =
-            image_addr.and_then(|image_addr| HqImage::find_loaded(image_addr, &hq_images));
-        if x == 0 && y == 0 {
-            *BACKGROUND.lock().unwrap() = hq_image.cloned();
-            *ORIGINAL_BG.lock().unwrap() = hq_image.map(|hq_image| hq_image.original_addr);
-        } else if let Some(frame) = hq_image {
-            let mut background = BACKGROUND.lock().unwrap();
-            if let Some(background) = background.as_mut()
-                && background.scale == frame.scale
-            {
-                let bytes_per_pixel = 4;
-                let x = (x * frame.scale) as usize;
-                let y = (y * frame.scale) as usize;
-                let width = frame.width as usize;
-                let bytes_width = width * bytes_per_pixel;
-                if !frame.has_alpha {
-                    for i in 0..frame.height as usize {
-                        let src_start = i * bytes_width;
-                        let src_slice = &frame.buffer[src_start..src_start + bytes_width];
-                        let dst_start = (background.width as usize * (y + i) + x) * bytes_per_pixel;
-                        let dst_slice = &mut background.buffer[dst_start..dst_start + bytes_width];
-                        dst_slice.copy_from_slice(src_slice);
-                    }
-                } else {
-                    for i in 0..frame.height as usize {
-                        for j in 0..width {
-                            let dst_start =
-                                (background.width as usize * (y + i) + (x + j)) * bytes_per_pixel;
-                            let dst_pixel = (
-                                background.buffer[dst_start],
-                                background.buffer[dst_start + 1],
-                                background.buffer[dst_start + 2],
-                                background.buffer[dst_start + 3],
-                            );
-                            let src_start = (width * i + j) * bytes_per_pixel;
-                            let src_pixel = (
-                                frame.buffer[src_start],
-                                frame.buffer[src_start + 1],
-                                frame.buffer[src_start + 2],
-                                frame.buffer[src_start + 3],
-                            );
-                            let (r, g, b) = blend_pixels(dst_pixel, src_pixel);
-                            background.buffer[dst_start] = r;
-                            background.buffer[dst_start + 1] = g;
-                            background.buffer[dst_start + 2] = b;
+        if let Some(image_addr) = image_addr {
+            if x == 0 && y == 0 {
+                let (background, original_addr) =
+                    HqImage::map_loaded(image_addr, &mut hq_images, |hq_image| {
+                        hq_image
+                            .wait_and_clone()
+                            .map(|clone| (clone, hq_image.original_addr))
+                    })
+                    .map_or((None, None), |(a, b)| (Some(a), Some(b)));
+                *BACKGROUND.lock().unwrap() = background;
+                *ORIGINAL_BG.lock().unwrap() = original_addr;
+            } else {
+                HqImage::with_loaded_or_else(
+                    image_addr,
+                    &mut hq_images,
+                    |overlay| {
+                        let mut background = BACKGROUND.lock().unwrap();
+                        let background = background.as_mut().filter(|bg| bg.scale == overlay.scale);
+                        if let Some(background) = background {
+                            overlay_background(x, y, background, overlay)
                         }
-                    }
-                }
+                    },
+                    |hq_images| {
+                        if let Some(original_background_addr) = extract(&ORIGINAL_BG) {
+                            *BACKGROUND.lock().unwrap() = HqImage::map_loaded(
+                                original_background_addr,
+                                hq_images,
+                                HqImage::wait_and_clone,
+                            );
+                        }
+                    },
+                );
             }
-        } else if let Some(original_background_addr) = extract(&ORIGINAL_BG) {
-            let hq_image = HqImage::find_loaded(original_background_addr, &hq_images);
-            *BACKGROUND.lock().unwrap() = hq_image.cloned();
         }
     }
 
@@ -332,11 +403,12 @@ pub extern "C" fn copy_image(
         } else {
             Some(ImageAddr(src_image as usize))
         };
-        let hq_images = HQ_IMAGES.lock().unwrap();
-        let hq_image =
-            image_addr.and_then(|image_addr| HqImage::find_loaded(image_addr, &hq_images));
-        if let Some(hq_image) = hq_image {
-            *OVERLAY.lock().unwrap() = Some(hq_image.original_addr);
+        if let Some(image_addr) = image_addr {
+            let mut hq_images = HQ_IMAGES.lock().unwrap();
+            *OVERLAY.lock().unwrap() =
+                HqImage::map_loaded(image_addr, &mut hq_images, |hq_image| {
+                    Some(hq_image.original_addr)
+                });
         }
     }
 
@@ -351,6 +423,60 @@ pub extern "C" fn copy_image(
             param_7,
             param_8,
         )
+    }
+}
+
+fn overlay_background(x: u32, y: u32, background: &mut HqImage, overlay: &mut HqImage) {
+    let background_width = background.width;
+    let overlay_width = overlay.width;
+    let overlay_height = overlay.height;
+    let overlay_scale = overlay.scale;
+    let mut background_data = background.data.0.lock().unwrap();
+    if let HqImageState::Loaded {
+        buffer: background_buffer,
+        has_alpha: _,
+    } = &mut *background_data
+    {
+        overlay.with_data(|overlay_buffer, overlay_has_alpha| {
+            let bytes_per_pixel = 4;
+            let x = (x * overlay_scale) as usize;
+            let y = (y * overlay_scale) as usize;
+            let width = overlay_width as usize;
+            let bytes_width = width * bytes_per_pixel;
+            if !overlay_has_alpha {
+                for i in 0..overlay_height as usize {
+                    let src_start = i * bytes_width;
+                    let src_slice = &overlay_buffer[src_start..src_start + bytes_width];
+                    let dst_start = (background_width as usize * (y + i) + x) * bytes_per_pixel;
+                    let dst_slice = &mut background_buffer[dst_start..dst_start + bytes_width];
+                    dst_slice.copy_from_slice(src_slice);
+                }
+            } else {
+                for i in 0..overlay_height as usize {
+                    for j in 0..width {
+                        let dst_start =
+                            (background_width as usize * (y + i) + (x + j)) * bytes_per_pixel;
+                        let dst_pixel = (
+                            background_buffer[dst_start],
+                            background_buffer[dst_start + 1],
+                            background_buffer[dst_start + 2],
+                            background_buffer[dst_start + 3],
+                        );
+                        let src_start = (width * i + j) * bytes_per_pixel;
+                        let src_pixel = (
+                            overlay_buffer[src_start],
+                            overlay_buffer[src_start + 1],
+                            overlay_buffer[src_start + 2],
+                            overlay_buffer[src_start + 3],
+                        );
+                        let (r, g, b) = blend_pixels(dst_pixel, src_pixel);
+                        background_buffer[dst_start] = r;
+                        background_buffer[dst_start + 1] = g;
+                        background_buffer[dst_start + 2] = b;
+                    }
+                }
+            }
+        });
     }
 }
 
@@ -426,16 +552,18 @@ fn get_target(surface_addr: SurfaceAddr) -> Option<Target> {
     }
 }
 
-fn with_target_hq_image<F: Fn(&HqImage)>(f: F) {
-    let background = BACKGROUND.lock().unwrap();
-    let hq_images = HQ_IMAGES.lock().unwrap();
-    let hq_image = match TARGET.lock().unwrap().as_ref() {
-        Some(Target::Background) => background.as_ref(),
-        Some(Target::Image(image_addr)) => HqImage::find_loaded(*image_addr, &hq_images),
-        _ => None,
-    };
-    if let Some(hq_image) = hq_image {
-        f(hq_image)
+fn with_target_hq_image<F: FnMut(&mut HqImage)>(mut f: F) {
+    let mut background = BACKGROUND.lock().unwrap();
+    let mut hq_images = HQ_IMAGES.lock().unwrap();
+    match TARGET.lock().unwrap().as_mut() {
+        Some(Target::Background) if let Some(background) = background.as_mut() => f(background),
+        Some(Target::Image(image_addr)) => HqImage::with_loaded_or_else(
+            *image_addr,
+            &mut hq_images,
+            |hq_image| f(hq_image),
+            |_| {},
+        ),
+        _ => {}
     }
 }
 
@@ -450,18 +578,22 @@ extern "stdcall" fn hq_tex_image_2d(
     _typ: gl::Enum,
     _data: *const c_void,
 ) {
-    with_target_hq_image(|hq_image| unsafe {
-        gl::tex_image_2d(
-            gl::TEXTURE_2D,
-            0,
-            gl::RGBA8 as gl::Int,
-            hq_image.width as gl::Int,
-            hq_image.height as gl::Int,
-            0,
-            gl::RGBA,
-            gl::UNSIGNED_BYTE,
-            hq_image.buffer.as_ptr() as *const _,
-        )
+    with_target_hq_image(|hq_image| {
+        let width = hq_image.width;
+        let height = hq_image.height;
+        hq_image.with_data(|buffer, _| unsafe {
+            gl::tex_image_2d(
+                gl::TEXTURE_2D,
+                0,
+                gl::RGBA8 as gl::Int,
+                width as gl::Int,
+                height as gl::Int,
+                0,
+                gl::RGBA,
+                gl::UNSIGNED_BYTE,
+                buffer.as_ptr() as *const _,
+            )
+        });
     })
 }
 

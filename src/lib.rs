@@ -1,4 +1,4 @@
-#![feature(fn_traits, let_chains, tuple_trait, unboxed_closures)]
+#![feature(fn_traits, if_let_guard, let_chains, tuple_trait, unboxed_closures)]
 
 mod animation;
 mod debug;
