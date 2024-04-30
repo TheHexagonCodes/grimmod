@@ -66,6 +66,14 @@ impl Decoder {
     }
 }
 
+impl Drop for Decoder {
+    fn drop(&mut self) {
+        unsafe {
+            vpx_sys::vpx_codec_destroy(&mut self.codec);
+        }
+    }
+}
+
 pub enum DecoderMode {
     Color,
     Alpha,
@@ -92,8 +100,8 @@ impl Frame {
 pub fn open<P: AsRef<Path>>(path: P) -> Option<Vec<Frame>> {
     let mut src = File::open(path).ok()?;
     let mut frames = Vec::new();
-    let mut color_codec = Decoder::new(DecoderMode::Color)?;
-    let mut alpha_codec = Decoder::new(DecoderMode::Alpha)?;
+    let mut color_decoder = Decoder::new(DecoderMode::Color)?;
+    let mut alpha_decoder = Decoder::new(DecoderMode::Alpha)?;
 
     let mut block_id = 0;
     let mut has_alpha = false;
@@ -116,18 +124,18 @@ pub fn open<P: AsRef<Path>>(path: P) -> Option<Vec<Frame>> {
                 current_frame.has_alpha = has_alpha;
             }
             Ok(MatroskaSpec::SimpleBlock(data)) => {
-                current_frame.buffer = color_codec.decode(&data, vpx_to_rgb)?;
+                current_frame.buffer = color_decoder.decode(&data, vpx_to_rgb)?;
                 frames.push(current_frame);
                 current_frame = Frame::new(width, height, has_alpha);
             }
             Ok(MatroskaSpec::Block(data)) => {
-                current_frame.buffer = color_codec.decode(&data, vpx_to_rgb)?;
+                current_frame.buffer = color_decoder.decode(&data, vpx_to_rgb)?;
             }
             Ok(MatroskaSpec::BlockAddID(block_add_id)) => {
                 block_id = block_add_id;
             }
             Ok(MatroskaSpec::BlockAdditional(data)) if block_id == 1 => {
-                alpha = alpha_codec.decode(&data, vpx_to_alpha)?;
+                alpha = alpha_decoder.decode(&data, vpx_to_alpha)?;
             }
             Ok(MatroskaSpec::BlockGroup(Master::End)) => {
                 block_id = 0;
