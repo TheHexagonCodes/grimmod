@@ -1,11 +1,16 @@
 use std::fs::File;
+use std::io::BufReader;
 use std::path::Path;
 use std::ptr::{null, null_mut};
 use std::slice;
+use std::thread;
 use webm_iterable::{
     matroska_spec::{Block, Master, MatroskaSpec},
     WebmIterator,
 };
+
+use crate::debug;
+use crate::image::HqImageAsyncData;
 
 struct Decoder {
     codec: vpx_sys::vpx_codec_ctx_t,
@@ -79,57 +84,63 @@ pub enum DecoderMode {
     Alpha,
 }
 
-pub struct Frame {
-    pub width: u32,
-    pub height: u32,
-    pub has_alpha: bool,
-    pub buffer: Vec<u8>,
-}
+pub fn open<P: AsRef<Path>>(path: P, datas: Vec<HqImageAsyncData>) -> Option<(u32, u32)> {
+    let src = File::open(&path).ok()?;
+    let mut reader = BufReader::new(src);
+    let (mut width, mut height) = (None, None);
 
-impl Frame {
-    pub fn new(width: u32, height: u32, has_alpha: bool) -> Frame {
-        Frame {
-            width,
-            height,
-            has_alpha,
-            buffer: Vec::new(),
+    for tag in WebmIterator::new(&mut reader, &[]) {
+        match tag {
+            Ok(MatroskaSpec::PixelWidth(pixel_width)) => {
+                width = Some(pixel_width as u32);
+                if height.is_some() {
+                    break;
+                }
+            }
+            Ok(MatroskaSpec::PixelHeight(pixel_height)) => {
+                height = Some(pixel_height as u32);
+                if width.is_some() {
+                    break;
+                }
+            }
+            _ => {}
         }
     }
+
+    let path = path.as_ref().to_owned();
+    thread::spawn(move || {
+        let mut datas = datas.into_iter();
+        let result = decode(&path, &mut datas);
+        if result.is_none() {
+            debug::error("error while decoding animation frames");
+            datas.for_each(|mut data| data.failed());
+        }
+    });
+
+    width.zip(height)
 }
 
-pub fn open<P: AsRef<Path>>(path: P) -> Option<Vec<Frame>> {
+fn decode(path: &Path, datas: &mut impl Iterator<Item = HqImageAsyncData>) -> Option<()> {
     let mut src = File::open(path).ok()?;
-    let mut frames = Vec::new();
     let mut color_decoder = Decoder::new(DecoderMode::Color)?;
     let mut alpha_decoder = Decoder::new(DecoderMode::Alpha)?;
 
     let mut block_id = 0;
     let mut has_alpha = false;
-    let (mut width, mut height) = (0, 0);
-    let mut current_frame = Frame::new(width, height, has_alpha);
+    let mut buffer = Vec::new();
     let mut alpha = Vec::new();
 
     for tag in WebmIterator::new(&mut src, &[]) {
         match tag {
-            Ok(MatroskaSpec::PixelWidth(pixel_width)) => {
-                width = pixel_width as u32;
-                current_frame.width = width;
-            }
-            Ok(MatroskaSpec::PixelHeight(pixel_height)) => {
-                height = pixel_height as u32;
-                current_frame.height = height;
-            }
             Ok(MatroskaSpec::AlphaMode(mode)) => {
                 has_alpha = mode == 1;
-                current_frame.has_alpha = has_alpha;
             }
             Ok(MatroskaSpec::SimpleBlock(data)) => {
-                current_frame.buffer = color_decoder.decode(&data, vpx_to_rgb)?;
-                frames.push(current_frame);
-                current_frame = Frame::new(width, height, has_alpha);
+                let decoded = color_decoder.decode(&data, vpx_to_rgb)?;
+                datas.next()?.loaded(decoded, has_alpha);
             }
             Ok(MatroskaSpec::Block(data)) => {
-                current_frame.buffer = color_decoder.decode(&data, vpx_to_rgb)?;
+                buffer = color_decoder.decode(&data, vpx_to_rgb)?;
             }
             Ok(MatroskaSpec::BlockAddID(block_add_id)) => {
                 block_id = block_add_id;
@@ -139,20 +150,23 @@ pub fn open<P: AsRef<Path>>(path: P) -> Option<Vec<Frame>> {
             }
             Ok(MatroskaSpec::BlockGroup(Master::End)) => {
                 block_id = 0;
-                merge_alpha(&mut current_frame.buffer, &mut alpha);
-                frames.push(current_frame);
-                current_frame = Frame::new(width, height, has_alpha);
+                let mut data = datas.next()?;
+                merge_alpha(&mut buffer, &mut alpha);
+                data.loaded(buffer, has_alpha);
+                buffer = Vec::new();
             }
             _ => {}
         }
     }
 
-    Some(frames)
+    Some(())
 }
 
 fn merge_alpha(rgba: &mut [u8], alpha: &mut [u8]) {
-    for i in 0..alpha.len() {
-        rgba[i * 4 + 3] = alpha[i];
+    if rgba.len() == alpha.len() * 4 {
+        for i in 0..alpha.len() {
+            rgba[i * 4 + 3] = alpha[i];
+        }
     }
 }
 
