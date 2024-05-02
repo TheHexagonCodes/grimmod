@@ -1,4 +1,4 @@
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -7,14 +7,14 @@ use crate::grim;
 
 const LOG_FILENAME: &str = "grimmod.log";
 
-lazy_static! {
-    static ref LOG_FILE: Option<File> = OpenOptions::new()
+static LOG_FILE: Lazy<Option<File>> = Lazy::new(|| {
+    OpenOptions::new()
         .write(true)
         .truncate(true)
         .create(true)
         .open(LOG_FILENAME)
-        .ok();
-}
+        .ok()
+});
 
 pub fn write<T: AsRef<str>>(message: T) -> Option<()> {
     if let Some(mut log_file) = LOG_FILE.as_ref() {

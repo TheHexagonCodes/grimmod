@@ -1,4 +1,4 @@
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use retour::RawDetour;
 use std::marker::PhantomData;
 use std::mem;
@@ -13,9 +13,7 @@ use windows::Win32::System::Threading::GetCurrentProcess;
 
 use crate::debug;
 
-lazy_static! {
-    pub static ref BASE_ADDRESS: usize = base_address().unwrap_or(0);
-}
+pub static BASE_ADDRESS: Lazy<usize> = Lazy::new(|| base_address().unwrap_or(0));
 
 pub fn base_address() -> Option<usize> {
     unsafe {

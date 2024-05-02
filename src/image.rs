@@ -1,4 +1,4 @@
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ffi::{c_char, c_int, c_uint, CStr, CString};
@@ -27,11 +27,10 @@ pub static BACKGROUND: Mutex<Option<HqImage>> = Mutex::new(None);
 pub static TARGET: Mutex<Option<Target>> = Mutex::new(None);
 pub static ORIGINAL_BG: Mutex<Option<ImageAddr>> = Mutex::new(None);
 
-lazy_static! {
-    pub static ref HQ_IMAGES: Mutex<Vec<HqImageContainer>> = Mutex::new(Vec::new());
-    pub static ref BACKGROUND_SHADER: usize = compile_background_shader() as usize;
-    pub static ref OVERLAYS: Mutex<HashMap<SurfaceAddr, ImageAddr>> = Mutex::new(HashMap::new());
-}
+pub static HQ_IMAGES: Lazy<Mutex<Vec<HqImageContainer>>> = Lazy::new(|| Mutex::new(Vec::new()));
+pub static BACKGROUND_SHADER: Lazy<usize> = Lazy::new(|| compile_background_shader() as usize);
+pub static OVERLAYS: Lazy<Mutex<HashMap<SurfaceAddr, ImageAddr>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug)]
 pub enum Target {
