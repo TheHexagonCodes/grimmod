@@ -23,7 +23,7 @@ pub struct SurfaceAddr(usize);
 
 pub static DECOMPRESSED: Mutex<Option<ImageAddr>> = Mutex::new(None);
 pub static OVERLAY: Mutex<Option<ImageAddr>> = Mutex::new(None);
-pub static BACKGROUND: Mutex<Option<HqImage>> = Mutex::new(None);
+pub static BACKGROUND: Mutex<Option<Background>> = Mutex::new(None);
 pub static TARGET: Mutex<Option<Target>> = Mutex::new(None);
 pub static ORIGINAL_BG: Mutex<Option<ImageAddr>> = Mutex::new(None);
 
@@ -36,6 +36,11 @@ pub static OVERLAYS: Lazy<Mutex<HashMap<SurfaceAddr, ImageAddr>>> =
 pub enum Target {
     Background,
     Image(ImageAddr),
+}
+
+pub enum TargetMut<'a> {
+    Background(&'a mut Background),
+    Image(&'a mut HqImage),
 }
 
 pub struct HqImageContainer {
@@ -200,27 +205,15 @@ impl HqImage {
         }
     }
 
-    fn wait_and_clone(&mut self) -> Option<HqImage> {
-        let name = self.name.clone();
+    fn to_background_mut(&mut self) -> Option<Background> {
         let width = self.width;
         let height = self.height;
         let scale = self.scale;
-        let original_addr = self.original_addr;
-        self.data.get_or_wait(|buffer, has_alpha| HqImage {
-            name: name.clone(),
+        self.data.get_or_wait(|buffer, _| Background {
             width,
             height,
             scale,
-            original_addr,
-            data: HqImageAsyncData {
-                raw: Arc::new((
-                    Mutex::new(HqImageState::Loaded {
-                        buffer: buffer.to_vec(),
-                        has_alpha,
-                    }),
-                    Condvar::new(),
-                )),
-            },
+            buffer: buffer.to_vec(),
         })
     }
 }
@@ -266,6 +259,75 @@ impl HqImageAsyncData {
             HqImageState::Loaded { buffer, has_alpha } => Some(f(buffer, *has_alpha)),
             _ => None,
         }
+    }
+}
+
+pub struct Background {
+    pub width: u32,
+    pub height: u32,
+    pub scale: u32,
+    pub buffer: Vec<u8>,
+}
+
+impl Background {
+    fn overlay(&mut self, x: u32, y: u32, overlay: &mut HqImage) {
+        let overlay_width = overlay.width;
+        let overlay_height = overlay.height;
+        let overlay_scale = overlay.scale;
+
+        overlay
+            .data
+            .get_or_wait(|overlay_buffer, overlay_has_alpha| {
+                let bytes_per_pixel = 4;
+                let x = (x * overlay_scale) as usize;
+                let y = (y * overlay_scale) as usize;
+                let width = overlay_width as usize;
+                let bytes_width = width * bytes_per_pixel;
+                if !overlay_has_alpha {
+                    for i in 0..overlay_height as usize {
+                        let src_start = i * bytes_width;
+                        let src_slice = &overlay_buffer[src_start..src_start + bytes_width];
+                        let dst_start = (self.width as usize * (y + i) + x) * bytes_per_pixel;
+                        let dst_slice = &mut self.buffer[dst_start..dst_start + bytes_width];
+                        dst_slice.copy_from_slice(src_slice);
+                    }
+                } else {
+                    for i in 0..overlay_height as usize {
+                        for j in 0..width {
+                            let dst_start =
+                                (self.width as usize * (y + i) + (x + j)) * bytes_per_pixel;
+                            let dst_pixel = (
+                                self.buffer[dst_start],
+                                self.buffer[dst_start + 1],
+                                self.buffer[dst_start + 2],
+                                self.buffer[dst_start + 3],
+                            );
+                            let src_start = (width * i + j) * bytes_per_pixel;
+                            let src_pixel = (
+                                overlay_buffer[src_start],
+                                overlay_buffer[src_start + 1],
+                                overlay_buffer[src_start + 2],
+                                overlay_buffer[src_start + 3],
+                            );
+                            let (r, g, b) = Background::blend_pixels(dst_pixel, src_pixel);
+                            self.buffer[dst_start] = r;
+                            self.buffer[dst_start + 1] = g;
+                            self.buffer[dst_start + 2] = b;
+                        }
+                    }
+                }
+            });
+    }
+
+    fn blend_pixels(background: (u8, u8, u8, u8), foreground: (u8, u8, u8, u8)) -> (u8, u8, u8) {
+        let (br, bg, bb, _) = background;
+        let (fr, fg, fb, fa) = foreground;
+
+        let r = (fr as u16 * fa as u16 + br as u16 * (255 - fa) as u16) / 255;
+        let g = (fg as u16 * fa as u16 + bg as u16 * (255 - fa) as u16) / 255;
+        let b = (fb as u16 * fa as u16 + bb as u16 * (255 - fa) as u16) / 255;
+
+        (r as u8, g as u8, b as u8)
     }
 }
 
@@ -372,8 +434,8 @@ pub extern "C" fn copy_image(
                 let (background, original_addr) =
                     HqImage::map_loaded(image_addr, &mut hq_images, |hq_image| {
                         hq_image
-                            .wait_and_clone()
-                            .map(|clone| (clone, hq_image.original_addr))
+                            .to_background_mut()
+                            .map(|bg| (bg, hq_image.original_addr))
                     })
                     .unzip();
                 *BACKGROUND.lock().unwrap() = background;
@@ -386,7 +448,7 @@ pub extern "C" fn copy_image(
                         let mut background = BACKGROUND.lock().unwrap();
                         let background = background.as_mut().filter(|bg| bg.scale == overlay.scale);
                         if let Some(background) = background {
-                            overlay_background(x, y, background, overlay)
+                            background.overlay(x, y, overlay)
                         }
                     },
                     |hq_images| {
@@ -394,7 +456,7 @@ pub extern "C" fn copy_image(
                             *BACKGROUND.lock().unwrap() = HqImage::map_loaded(
                                 original_background_addr,
                                 hq_images,
-                                HqImage::wait_and_clone,
+                                HqImage::to_background_mut,
                             );
                         }
                     },
@@ -434,73 +496,6 @@ pub extern "C" fn copy_image(
             param_8,
         )
     }
-}
-
-fn overlay_background(x: u32, y: u32, background: &mut HqImage, overlay: &mut HqImage) {
-    let background_width = background.width;
-    let overlay_width = overlay.width;
-    let overlay_height = overlay.height;
-    let overlay_scale = overlay.scale;
-    let mut background_data = background.data.raw.0.lock().unwrap();
-    if let HqImageState::Loaded {
-        buffer: background_buffer,
-        has_alpha: _,
-    } = &mut *background_data
-    {
-        overlay
-            .data
-            .get_or_wait(|overlay_buffer, overlay_has_alpha| {
-                let bytes_per_pixel = 4;
-                let x = (x * overlay_scale) as usize;
-                let y = (y * overlay_scale) as usize;
-                let width = overlay_width as usize;
-                let bytes_width = width * bytes_per_pixel;
-                if !overlay_has_alpha {
-                    for i in 0..overlay_height as usize {
-                        let src_start = i * bytes_width;
-                        let src_slice = &overlay_buffer[src_start..src_start + bytes_width];
-                        let dst_start = (background_width as usize * (y + i) + x) * bytes_per_pixel;
-                        let dst_slice = &mut background_buffer[dst_start..dst_start + bytes_width];
-                        dst_slice.copy_from_slice(src_slice);
-                    }
-                } else {
-                    for i in 0..overlay_height as usize {
-                        for j in 0..width {
-                            let dst_start =
-                                (background_width as usize * (y + i) + (x + j)) * bytes_per_pixel;
-                            let dst_pixel = (
-                                background_buffer[dst_start],
-                                background_buffer[dst_start + 1],
-                                background_buffer[dst_start + 2],
-                                background_buffer[dst_start + 3],
-                            );
-                            let src_start = (width * i + j) * bytes_per_pixel;
-                            let src_pixel = (
-                                overlay_buffer[src_start],
-                                overlay_buffer[src_start + 1],
-                                overlay_buffer[src_start + 2],
-                                overlay_buffer[src_start + 3],
-                            );
-                            let (r, g, b) = blend_pixels(dst_pixel, src_pixel);
-                            background_buffer[dst_start] = r;
-                            background_buffer[dst_start + 1] = g;
-                            background_buffer[dst_start + 2] = b;
-                        }
-                    }
-                }
-            });
-    }
-}
-
-fn blend_pixels(background: (u8, u8, u8, u8), foreground: (u8, u8, u8, u8)) -> (u8, u8, u8) {
-    let (br, bg, bb, _) = background;
-    let (fr, fg, fb, fa) = foreground;
-
-    let r = (fr as u16 * fa as u16 + br as u16 * (255 - fa) as u16) / 255;
-    let g = (fg as u16 * fa as u16 + bg as u16 * (255 - fa) as u16) / 255;
-    let b = (fb as u16 * fa as u16 + bb as u16 * (255 - fa) as u16) / 255;
-
-    (r as u8, g as u8, b as u8)
 }
 
 /// Prepare a surface (aka texture) for uploading to the GPU or upload it now
@@ -564,15 +559,17 @@ fn get_target(surface_addr: SurfaceAddr) -> Option<Target> {
     }
 }
 
-fn with_target_hq_image<F: FnMut(&mut HqImage)>(mut f: F) {
+fn with_target_hq_image<F: FnMut(TargetMut)>(mut f: F) {
     let mut background = BACKGROUND.lock().unwrap();
     let mut hq_images = HQ_IMAGES.lock().unwrap();
     match TARGET.lock().unwrap().as_mut() {
-        Some(Target::Background) if let Some(background) = background.as_mut() => f(background),
+        Some(Target::Background) if let Some(background) = background.as_mut() => {
+            f(TargetMut::Background(background))
+        }
         Some(Target::Image(image_addr)) => HqImage::with_loaded_or_else(
             *image_addr,
             &mut hq_images,
-            |hq_image| f(hq_image),
+            |hq_image| f(TargetMut::Image(hq_image)),
             |_| {},
         ),
         _ => {}
@@ -590,10 +587,8 @@ extern "stdcall" fn hq_tex_image_2d(
     _typ: gl::Enum,
     _data: *const c_void,
 ) {
-    with_target_hq_image(|hq_image| {
-        let width = hq_image.width;
-        let height = hq_image.height;
-        hq_image.data.get_or_wait(|buffer, _| unsafe {
+    fn tex_image_2d(width: u32, height: u32, ptr: *const u8) {
+        unsafe {
             gl::tex_image_2d(
                 gl::TEXTURE_2D,
                 0,
@@ -603,16 +598,34 @@ extern "stdcall" fn hq_tex_image_2d(
                 0,
                 gl::RGBA,
                 gl::UNSIGNED_BYTE,
-                buffer.as_ptr() as *const _,
+                ptr as *const _,
             )
-        });
+        }
+    }
+    with_target_hq_image(|target_ref| match target_ref {
+        TargetMut::Background(background) => tex_image_2d(
+            background.width,
+            background.height,
+            background.buffer.as_ptr(),
+        ),
+        TargetMut::Image(hq_image) => {
+            let width = hq_image.width;
+            let height = hq_image.height;
+            hq_image
+                .data
+                .get_or_wait(|buffer, _| tex_image_2d(width, height, buffer.as_ptr()));
+        }
     })
 }
 
 extern "stdcall" fn hq_pixel_storei(pname: gl::Enum, param: gl::Int) {
-    with_target_hq_image(|hq_image| unsafe {
+    with_target_hq_image(|target_ref| unsafe {
         if pname == gl::UNPACK_ROW_LENGTH {
-            gl::pixel_storei(gl::UNPACK_ROW_LENGTH, hq_image.width as gl::Int);
+            let width = match target_ref {
+                TargetMut::Background(background) => background.width,
+                TargetMut::Image(hq_image) => hq_image.width,
+            };
+            gl::pixel_storei(gl::UNPACK_ROW_LENGTH, width as gl::Int);
         } else {
             gl::pixel_storei(pname, param);
         }
