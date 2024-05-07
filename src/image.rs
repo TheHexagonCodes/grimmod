@@ -24,8 +24,8 @@ pub struct SurfaceAddr(usize);
 pub static DECOMPRESSED: Mutex<Option<ImageAddr>> = Mutex::new(None);
 pub static OVERLAY: Mutex<Option<ImageAddr>> = Mutex::new(None);
 pub static BACKGROUND: Mutex<Option<Background>> = Mutex::new(None);
+pub static BACKGROUND_SNAPSHOT: Mutex<Option<Background>> = Mutex::new(None);
 pub static TARGET: Mutex<Option<Target>> = Mutex::new(None);
-pub static ORIGINAL_BG: Mutex<Option<ImageAddr>> = Mutex::new(None);
 
 pub static HQ_IMAGES: Lazy<Mutex<Vec<HqImageContainer>>> = Lazy::new(|| Mutex::new(Vec::new()));
 pub static BACKGROUND_SHADER: Lazy<usize> = Lazy::new(|| compile_background_shader() as usize);
@@ -51,6 +51,7 @@ pub struct HqImageContainer {
 
 pub struct HqImage {
     pub name: String,
+    pub index: usize,
     pub width: u32,
     pub height: u32,
     pub scale: u32,
@@ -134,6 +135,7 @@ impl HqImage {
 
         Some(vec![HqImage {
             name: name.to_string(),
+            index: 0,
             width,
             height,
             scale: width / image.attributes.width as u32,
@@ -154,6 +156,7 @@ impl HqImage {
                 .enumerate()
                 .map(|(i, (dst, (image, image_addr)))| HqImage {
                     name: format!("{} ({:02})", name, i),
+                    index: i,
                     width,
                     height,
                     scale: width / image.attributes.width as u32,
@@ -187,11 +190,11 @@ impl HqImage {
         original_addr: ImageAddr,
         hq_images: &mut MutexGuard<Vec<HqImageContainer>>,
         mut some: SF,
-        mut none: NF,
+        none: NF,
     ) -> R
     where
         SF: FnMut(&mut HqImage) -> R,
-        NF: FnMut(&mut MutexGuard<Vec<HqImageContainer>>) -> R,
+        NF: Fn() -> R,
     {
         let hq_image = hq_images.iter_mut().find_map(|hq_image_container| {
             hq_image_container
@@ -201,7 +204,7 @@ impl HqImage {
         });
         match hq_image {
             Some(hq_image) => some(hq_image),
-            None => none(hq_images),
+            None => none(),
         }
     }
 
@@ -262,6 +265,7 @@ impl HqImageAsyncData {
     }
 }
 
+#[derive(Clone)]
 pub struct Background {
     pub width: u32,
     pub height: u32,
@@ -271,6 +275,11 @@ pub struct Background {
 
 impl Background {
     fn overlay(&mut self, x: u32, y: u32, overlay: &mut HqImage) {
+        if self.scale != overlay.scale {
+            debug::error(format!("{} has wrong scale for background", overlay.name));
+            return;
+        }
+
         let overlay_width = overlay.width;
         let overlay_height = overlay.height;
         let overlay_scale = overlay.scale;
@@ -317,6 +326,34 @@ impl Background {
                     }
                 }
             });
+    }
+
+    fn animate(x: u32, y: u32, overlay: &mut HqImage) {
+        let mut background = BACKGROUND.lock().unwrap();
+        if let Some(background) = background.as_mut() {
+            // before writing the first frame of an animation, save a snapshot of the bg
+            // this will be restored as the background once the animation ends
+            if overlay.index == 0 {
+                background.save();
+            }
+            background.overlay(x, y, overlay);
+        }
+    }
+
+    fn set_from_image(image_addr: ImageAddr, hq_images: &mut MutexGuard<Vec<HqImageContainer>>) {
+        *BACKGROUND.lock().unwrap() =
+            HqImage::map_loaded(image_addr, hq_images, HqImage::to_background_mut);
+        *BACKGROUND_SNAPSHOT.lock().unwrap() = None;
+    }
+
+    fn save(&self) {
+        *BACKGROUND_SNAPSHOT.lock().unwrap() = Some(self.clone());
+    }
+
+    fn restore() {
+        if let Some(background) = BACKGROUND_SNAPSHOT.lock().unwrap().take() {
+            *BACKGROUND.lock().unwrap() = Some(background);
+        }
     }
 
     fn blend_pixels(background: (u8, u8, u8, u8), foreground: (u8, u8, u8, u8)) -> (u8, u8, u8) {
@@ -431,35 +468,13 @@ pub extern "C" fn copy_image(
         };
         if let Some(image_addr) = image_addr {
             if x == 0 && y == 0 {
-                let (background, original_addr) =
-                    HqImage::map_loaded(image_addr, &mut hq_images, |hq_image| {
-                        hq_image
-                            .to_background_mut()
-                            .map(|bg| (bg, hq_image.original_addr))
-                    })
-                    .unzip();
-                *BACKGROUND.lock().unwrap() = background;
-                *ORIGINAL_BG.lock().unwrap() = original_addr;
+                Background::set_from_image(image_addr, &mut hq_images);
             } else {
                 HqImage::with_loaded_or_else(
                     image_addr,
                     &mut hq_images,
-                    |overlay| {
-                        let mut background = BACKGROUND.lock().unwrap();
-                        let background = background.as_mut().filter(|bg| bg.scale == overlay.scale);
-                        if let Some(background) = background {
-                            background.overlay(x, y, overlay)
-                        }
-                    },
-                    |hq_images| {
-                        if let Some(original_background_addr) = extract(&ORIGINAL_BG) {
-                            *BACKGROUND.lock().unwrap() = HqImage::map_loaded(
-                                original_background_addr,
-                                hq_images,
-                                HqImage::to_background_mut,
-                            );
-                        }
-                    },
+                    |overlay| Background::animate(x, y, overlay),
+                    Background::restore,
                 );
             }
         }
@@ -570,7 +585,7 @@ fn with_target_hq_image<F: FnMut(TargetMut)>(mut f: F) {
             *image_addr,
             &mut hq_images,
             |hq_image| f(TargetMut::Image(hq_image)),
-            |_| {},
+            || {},
         ),
         _ => {}
     }
