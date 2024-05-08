@@ -1,6 +1,7 @@
 #![feature(fn_traits, if_let_guard, let_chains, tuple_trait, unboxed_closures)]
 
 mod animation;
+mod bridge;
 mod debug;
 mod file;
 mod gl;
@@ -33,13 +34,15 @@ fn main() {
     }
 
     unsafe {
-        grim::open_bm_image.hook(image::open_bm_image as grim::OpenBmImage);
+        grim::open_bm_image.hook(bridge::open_bm_image as grim::OpenBmImage);
+        grim::manage_resource.hook(bridge::manage_resource as grim::ManageResource);
+        grim::copy_image.hook(bridge::copy_image as grim::CopyImage);
+        grim::decompress_image.hook(bridge::decompress_image as grim::DecompressImage);
+
         grim::surface_upload.hook(image::surface_upload as grim::SurfaceUpload);
-        grim::surface_allocate.hook(image::surface_allocate as grim::SurfaceAllocate);
-        grim::surface_bind_existing.hook(image::surface_bind_existing as grim::SurfaceBindExisting);
-        grim::copy_image.hook(image::copy_image as grim::CopyImage);
-        grim::decompress_image.hook(image::decompress_image as grim::DecompressImage);
-        grim::manage_resource.hook(image::manage_resource as grim::ManageResource);
+        grim::surface_allocate.hook(bridge::surface_allocate as grim::SurfaceAllocate);
+        grim::surface_bind_existing
+            .hook(bridge::surface_bind_existing as grim::SurfaceBindExisting);
         grim::setup_draw.hook(image::setup_draw as grim::SetupDraw);
     };
 

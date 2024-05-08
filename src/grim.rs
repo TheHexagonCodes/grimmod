@@ -18,7 +18,7 @@ fns! {
     #[address(0xE6700)]
     extern "C" fn read_all(dst: *mut *const c_void, size: *mut usize, filename: *const c_char);
 
-    // reads and parses a bitmap (.bm/.zbm) image into unified image container
+    // Reads and parses a bitmap (.bm/.zbm) image into unified image container
     #[address(0xDADE0)]
     extern "C" fn open_bm_image(
         filename: *const c_char,
@@ -26,6 +26,7 @@ fns! {
         param_3: u32,
     ) -> *mut ImageContainer;
 
+    // Copy an image and surface from a source to a pre-allocated destination
     #[address(0xE5EC0)]
     extern "C" fn copy_image(
         dst_image: *mut Image,
@@ -37,13 +38,18 @@ fns! {
         param_7: u32,
         param_8: u32,
     );
+
+    // Decompresses an image into the global decompression buffer
     #[address(0x24D20)]
     extern "C" fn decompress_image(image: *const Image);
+
     #[address(0x2B340)]
     extern "C" fn manage_resource(resource: *mut Resource) -> c_int;
 
     #[address(0xE8A80)]
     extern "C" fn surface_upload(surface: *mut Surface, image_data: *mut c_void);
+
+    // Allocate a new surface (texture) with a given width/height
     #[address(0xECF70)]
     extern "C" fn surface_allocate(
         width: c_int,
@@ -51,6 +57,7 @@ fns! {
         format: c_uint,
         param_4: c_int
     ) -> *const Surface;
+
     #[address(0x12ED20)]
     extern "C" fn surface_bind_existing(
         surface: *mut Surface,

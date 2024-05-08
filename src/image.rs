@@ -1,36 +1,23 @@
 use once_cell::sync::Lazy;
-use std::collections::HashMap;
 use std::ffi::c_void;
-use std::ffi::{c_char, c_int, c_uint, CStr, CString};
+use std::ffi::{c_uint, CString};
 use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 
 use crate::animation;
+use crate::bridge::{Image, ImageAddr, ImageContainer, ImageContainerAddr, SurfaceAddr, OVERLAYS};
 use crate::debug;
 use crate::file;
 use crate::gl;
 use crate::grim;
 
-#[derive(Clone, Copy, Default, Hash, Eq, PartialEq)]
-pub struct ImageContainerAddr(usize);
-
-#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
-pub struct ImageAddr(usize);
-
-#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
-pub struct SurfaceAddr(usize);
-
-pub static DECOMPRESSED: Mutex<Option<ImageAddr>> = Mutex::new(None);
-pub static OVERLAY: Mutex<Option<ImageAddr>> = Mutex::new(None);
 pub static BACKGROUND: Mutex<Option<Background>> = Mutex::new(None);
 pub static BACKGROUND_SNAPSHOT: Mutex<Option<Background>> = Mutex::new(None);
 pub static TARGET: Mutex<Option<Target>> = Mutex::new(None);
 
 pub static HQ_IMAGES: Lazy<Mutex<Vec<HqImageContainer>>> = Lazy::new(|| Mutex::new(Vec::new()));
 pub static BACKGROUND_SHADER: Lazy<usize> = Lazy::new(|| compile_background_shader() as usize);
-pub static OVERLAYS: Lazy<Mutex<HashMap<SurfaceAddr, ImageAddr>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug)]
 pub enum Target {
@@ -60,56 +47,50 @@ pub struct HqImage {
 }
 
 impl HqImageContainer {
-    unsafe fn from_raw(
-        raw_image_container: *const grim::ImageContainer,
-    ) -> Option<HqImageContainer> {
-        let image_container = raw_image_container.as_ref()?;
-        let name = image_container.name.as_ptr();
-        let n_images = image_container.image_count as usize;
-        let image_refs = std::slice::from_raw_parts(image_container.images, n_images);
-        let images: Vec<_> = image_refs
-            .iter()
-            .filter_map(|image| {
-                image
-                    .as_ref()
-                    .map(|image_ref| (image_ref, ImageAddr(*image as usize)))
-            })
-            .collect();
-        let filename = CStr::from_ptr(name).to_str().ok()?;
-        if filename.to_lowercase().ends_with(".bm") {
-            HqImageContainer::open(filename, image_container, &images)
-        } else {
-            None
+    pub fn open(image_container: &ImageContainer) -> Option<HqImageContainer> {
+        let filename = image_container.name().to_lowercase();
+        if !filename.ends_with(".bm") {
+            return None;
         }
-    }
-
-    fn open(
-        bm_filename: &str,
-        image_container: &grim::ImageContainer,
-        images: &[(&grim::Image, ImageAddr)],
-    ) -> Option<HqImageContainer> {
-        let name = Path::new(bm_filename).file_stem()?.to_str()?;
-        let hq_images =
-            HqImage::open_image(name, images).or_else(|| HqImage::open_animation(name, images))?;
+        let name = Path::new(&filename).file_stem()?.to_str()?;
+        let images = image_container.images();
+        let hq_images = HqImage::open_image(name, &images)
+            .or_else(|| HqImage::open_animation(name, &images))?;
 
         Some(HqImageContainer {
             name: name.to_string(),
-            original_addr: ImageContainerAddr(image_container as *const _ as usize),
+            original_addr: image_container.original_addr,
             images: hq_images,
         })
     }
 
-    fn deallocate(index: usize, hq_image_containers: &mut MutexGuard<'_, Vec<HqImageContainer>>) {
-        let hq_image_container = hq_image_containers.remove(index);
-        let mut overlays = OVERLAYS.lock().unwrap();
-        for hq_image in hq_image_container.images.iter() {
-            overlays.retain(|_, image_addr| image_addr != &hq_image.original_addr);
-        }
+    pub fn load(image_container: &ImageContainer) -> Option<HqImageContainer> {
+        let hq_image_container = HqImageContainer::open(image_container)?;
+        let mut hq_image_containers = HQ_IMAGES.lock().unwrap();
+        let image_addrs = image_container.image_addrs();
+        let existing_index = hq_image_containers.iter().position(|hq_image_container| {
+            hq_image_container
+                .images
+                .iter()
+                .any(|image| image_addrs.contains(&image.original_addr))
+        });
+        let removed = existing_index.map(|index| hq_image_containers.remove(index));
+        hq_image_containers.push(hq_image_container);
+
+        removed
+    }
+
+    pub fn unload(image_container_addr: ImageContainerAddr) -> Option<HqImageContainer> {
+        let mut hq_image_containers = HQ_IMAGES.lock().unwrap();
+        let index = hq_image_containers.iter().position(|hq_image_container| {
+            hq_image_container.original_addr == image_container_addr
+        });
+        index.map(|index| hq_image_containers.remove(index))
     }
 }
 
 impl HqImage {
-    fn open_image(name: &str, images: &[(&grim::Image, ImageAddr)]) -> Option<Vec<HqImage>> {
+    fn open_image(name: &str, images: &[&Image]) -> Option<Vec<HqImage>> {
         let path = file::find_modded(&format!("{}.png", name))?;
         if images.len() != 1 {
             debug::error(format!(
@@ -118,7 +99,7 @@ impl HqImage {
             ));
             return None;
         }
-        let (image, image_addr) = images.first()?;
+        let image = images.first()?;
         let (width, height) = image::image_dimensions(&path).ok()?;
         let data = HqImageAsyncData::new();
 
@@ -138,13 +119,13 @@ impl HqImage {
             index: 0,
             width,
             height,
-            scale: width / image.attributes.width as u32,
-            original_addr: *image_addr,
+            scale: width / image.width as u32,
+            original_addr: image.original_addr,
             data,
         }])
     }
 
-    fn open_animation(name: &str, images: &[(&grim::Image, ImageAddr)]) -> Option<Vec<HqImage>> {
+    fn open_animation(name: &str, images: &[&Image]) -> Option<Vec<HqImage>> {
         let path = file::find_modded(&format!("{}.mkv", name))?;
         let datas: Vec<_> = (0..images.len()).map(|_| HqImageAsyncData::new()).collect();
         let (width, height) = animation::open(path, datas.clone())?;
@@ -154,17 +135,27 @@ impl HqImage {
                 .into_iter()
                 .zip(images)
                 .enumerate()
-                .map(|(i, (dst, (image, image_addr)))| HqImage {
+                .map(|(i, (dst, image))| HqImage {
                     name: format!("{} ({:02})", name, i),
                     index: i,
                     width,
                     height,
-                    scale: width / image.attributes.width as u32,
-                    original_addr: *image_addr,
+                    scale: width / image.width as u32,
+                    original_addr: image.original_addr,
                     data: dst,
                 })
                 .collect(),
         )
+    }
+
+    pub fn is_loaded(addr: ImageAddr) -> bool {
+        let mut hq_images = HQ_IMAGES.lock().unwrap();
+        hq_images.iter_mut().any(|hq_image_container| {
+            hq_image_container
+                .images
+                .iter_mut()
+                .any(|hq_image| hq_image.original_addr == addr)
+        })
     }
 
     fn map_loaded<F, R>(
@@ -274,6 +265,61 @@ pub struct Background {
 }
 
 impl Background {
+    /// Write (or draw over) the HQ background
+    pub fn write(image_addr: ImageAddr, x: u32, y: u32) {
+        let mut hq_images = HQ_IMAGES.lock().unwrap();
+        if x == 0 && y == 0 {
+            Background::set_from_image(image_addr, &mut hq_images);
+        } else {
+            HqImage::with_loaded_or_else(
+                image_addr,
+                &mut hq_images,
+                |overlay| Background::animate(x, y, overlay),
+                Background::restore,
+            );
+        }
+    }
+
+    fn animate(x: u32, y: u32, overlay: &mut HqImage) {
+        let mut background = BACKGROUND.lock().unwrap();
+        if let Some(background) = background.as_mut() {
+            // before writing the first frame of an animation, save a snapshot of the bg
+            // this will be restored as the background once the animation ends
+            if overlay.index == 0 {
+                background.save();
+            }
+            background.overlay(x, y, overlay);
+        }
+    }
+
+    fn set_from_image(image_addr: ImageAddr, hq_images: &mut MutexGuard<Vec<HqImageContainer>>) {
+        *BACKGROUND.lock().unwrap() =
+            HqImage::map_loaded(image_addr, hq_images, HqImage::to_background_mut);
+        *BACKGROUND_SNAPSHOT.lock().unwrap() = None;
+    }
+
+    fn restore() {
+        let background = BACKGROUND_SNAPSHOT.lock().unwrap().take();
+        if background.is_some() {
+            *BACKGROUND.lock().unwrap() = background;
+        }
+    }
+
+    fn blend_pixels(background: (u8, u8, u8, u8), foreground: (u8, u8, u8, u8)) -> (u8, u8, u8) {
+        let (br, bg, bb, _) = background;
+        let (fr, fg, fb, fa) = foreground;
+
+        let r = (fr as u16 * fa as u16 + br as u16 * (255 - fa) as u16) / 255;
+        let g = (fg as u16 * fa as u16 + bg as u16 * (255 - fa) as u16) / 255;
+        let b = (fb as u16 * fa as u16 + bb as u16 * (255 - fa) as u16) / 255;
+
+        (r as u8, g as u8, b as u8)
+    }
+
+    fn save(&self) {
+        *BACKGROUND_SNAPSHOT.lock().unwrap() = Some(self.clone());
+    }
+
     fn overlay(&mut self, x: u32, y: u32, overlay: &mut HqImage) {
         if self.scale != overlay.scale {
             debug::error(format!("{} has wrong scale for background", overlay.name));
@@ -327,45 +373,6 @@ impl Background {
                 }
             });
     }
-
-    fn animate(x: u32, y: u32, overlay: &mut HqImage) {
-        let mut background = BACKGROUND.lock().unwrap();
-        if let Some(background) = background.as_mut() {
-            // before writing the first frame of an animation, save a snapshot of the bg
-            // this will be restored as the background once the animation ends
-            if overlay.index == 0 {
-                background.save();
-            }
-            background.overlay(x, y, overlay);
-        }
-    }
-
-    fn set_from_image(image_addr: ImageAddr, hq_images: &mut MutexGuard<Vec<HqImageContainer>>) {
-        *BACKGROUND.lock().unwrap() =
-            HqImage::map_loaded(image_addr, hq_images, HqImage::to_background_mut);
-        *BACKGROUND_SNAPSHOT.lock().unwrap() = None;
-    }
-
-    fn save(&self) {
-        *BACKGROUND_SNAPSHOT.lock().unwrap() = Some(self.clone());
-    }
-
-    fn restore() {
-        if let Some(background) = BACKGROUND_SNAPSHOT.lock().unwrap().take() {
-            *BACKGROUND.lock().unwrap() = Some(background);
-        }
-    }
-
-    fn blend_pixels(background: (u8, u8, u8, u8), foreground: (u8, u8, u8, u8)) -> (u8, u8, u8) {
-        let (br, bg, bb, _) = background;
-        let (fr, fg, fb, fa) = foreground;
-
-        let r = (fr as u16 * fa as u16 + br as u16 * (255 - fa) as u16) / 255;
-        let g = (fg as u16 * fa as u16 + bg as u16 * (255 - fa) as u16) / 255;
-        let b = (fb as u16 * fa as u16 + bb as u16 * (255 - fa) as u16) / 255;
-
-        (r as u8, g as u8, b as u8)
-    }
 }
 
 /// Return the address for the background render pass's surface
@@ -374,8 +381,8 @@ fn bitmap_underlays_surface() -> Option<SurfaceAddr> {
         let render_pass = grim::BITMAP_UNDERLAYS_RENDER_PASS.inner_ref();
         let render_pass_data =
             render_pass.and_then(|render_pass| render_pass.entities.data().first());
-        let surface = render_pass_data.map(|render_pass_data| render_pass_data.surface as usize);
-        surface.map(SurfaceAddr)
+        let surface = render_pass_data.map(|render_pass_data| render_pass_data.surface);
+        surface.map(SurfaceAddr::from_ptr)
     }
 }
 
@@ -384,132 +391,8 @@ fn virtual_depth_surface() -> Option<SurfaceAddr> {
         let render_pass = grim::VIRTUAL_DEPTH_RENDER_PASS.inner_ref();
         let render_pass_data =
             render_pass.and_then(|render_pass| render_pass.entities.data().first());
-        let surface = render_pass_data.map(|render_pass_data| render_pass_data.surface as usize);
-        surface.map(SurfaceAddr)
-    }
-}
-
-fn extract<T>(mutex: &Mutex<Option<T>>) -> Option<T> {
-    mutex.lock().ok()?.take()
-}
-
-/// Loads the contents of a BM file into an image container
-///
-/// This is an overload for a native function that will be hooked
-pub extern "C" fn open_bm_image(
-    raw_filename: *const c_char,
-    param_2: u32,
-    param_3: u32,
-) -> *mut grim::ImageContainer {
-    unsafe {
-        let image_container = grim::open_bm_image(raw_filename, param_2, param_3);
-
-        // instead of allocating a new image, the game sometimes reuses an existing one
-        // detect this re-use and treat it as a deallocation for old hq images
-        if let Some(image_container) = image_container.as_ref() {
-            let image_addrs = std::slice::from_raw_parts(
-                image_container.images as *const usize,
-                image_container.image_count as usize,
-            );
-            let mut hq_image_containers = HQ_IMAGES.lock().unwrap();
-            let index = hq_image_containers.iter().position(|image_container| {
-                image_container
-                    .images
-                    .iter()
-                    .any(|image| image_addrs.contains(&image.original_addr.0))
-            });
-            if let Some(index) = index {
-                HqImageContainer::deallocate(index, &mut hq_image_containers);
-            }
-        }
-
-        if let Some(hq_image_container) = HqImageContainer::from_raw(image_container) {
-            HQ_IMAGES.lock().unwrap().push(hq_image_container);
-        }
-
-        image_container
-    }
-}
-
-/// Decompresses an image into the global decompression buffer
-///
-/// This is an overload for a native function that will be hooked
-pub extern "C" fn decompress_image(image: *const grim::Image) {
-    // store the address of the last image decompressed
-    // it will shortly be copied to the clean buffer and rendered
-    *DECOMPRESSED.lock().unwrap() = Some(ImageAddr(image as usize));
-
-    unsafe { grim::decompress_image(image) }
-}
-
-/// Copy an image and surface from a source to a pre-allocated destination
-///
-/// This is an overload for a native function that will be hooked
-pub extern "C" fn copy_image(
-    dst_image: *mut grim::Image,
-    dst_surface: *mut c_void,
-    src_image: *mut grim::Image,
-    src_surface: *mut c_void,
-    x: u32,
-    y: u32,
-    param_7: u32,
-    param_8: u32,
-) {
-    // detect an image with an associated hq image being copied to the clean buffer
-    // an image being copied to the clean first buffer means it is a background (or about to draw
-    // over the background) to be rendered
-    if dst_image as usize == unsafe { grim::CLEAN_BUFFER.inner_addr() } {
-        let mut hq_images = HQ_IMAGES.lock().unwrap();
-        let image_addr = if src_image as usize == unsafe { grim::DECOMPRESSION_BUFFER.inner_addr() }
-        {
-            extract(&DECOMPRESSED)
-        } else {
-            Some(ImageAddr(src_image as usize))
-        };
-        if let Some(image_addr) = image_addr {
-            if x == 0 && y == 0 {
-                Background::set_from_image(image_addr, &mut hq_images);
-            } else {
-                HqImage::with_loaded_or_else(
-                    image_addr,
-                    &mut hq_images,
-                    |overlay| Background::animate(x, y, overlay),
-                    Background::restore,
-                );
-            }
-        }
-    }
-
-    // if an image with an associated hq image is being written directly to the back buffer
-    // then that indicates that it's an overlay
-    // store this overlay temporarily to see what surface it is bound to
-    if dst_image as usize == unsafe { grim::BACK_BUFFER.addr() } {
-        let image_addr = if src_image as usize == unsafe { grim::DECOMPRESSION_BUFFER.inner_addr() }
-        {
-            extract(&DECOMPRESSED)
-        } else {
-            Some(ImageAddr(src_image as usize))
-        };
-        if let Some(image_addr) = image_addr {
-            let mut hq_images = HQ_IMAGES.lock().unwrap();
-            *OVERLAY.lock().unwrap() =
-                HqImage::map_loaded(image_addr, &mut hq_images, |hq_image| {
-                    Some(hq_image.original_addr)
-                });
-        }
-    }
-
-    unsafe {
-        grim::copy_image(
-            dst_image,
-            dst_surface,
-            src_image,
-            src_surface,
-            x,
-            y,
-            param_7,
-            param_8,
-        )
+        let surface = render_pass_data.map(|render_pass_data| render_pass_data.surface);
+        surface.map(SurfaceAddr::from_ptr)
     }
 }
 
@@ -517,7 +400,7 @@ pub extern "C" fn copy_image(
 ///
 /// This is an overload for a native function that will be hooked
 pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c_void) {
-    let surface_addr = SurfaceAddr(surface as usize);
+    let surface_addr = SurfaceAddr::from_ptr(surface);
     // overriding textures does not work and leads to bugs in in the following situations:
     // 1. The modern deferred renderer is off
     // 2. The game is paused
@@ -647,66 +530,6 @@ extern "stdcall" fn hq_pixel_storei(pname: gl::Enum, param: gl::Int) {
     })
 }
 
-/// Allocate a new surface (texture) of a given width/height
-///
-/// This is an overload for a native function that will be hooked
-pub extern "C" fn surface_allocate(
-    width: c_int,
-    height: c_int,
-    format: c_uint,
-    param_4: c_int,
-) -> *const grim::Surface {
-    let surface = unsafe { grim::surface_allocate(width, height, format, param_4) };
-    let surface_addr = SurfaceAddr(surface as usize);
-
-    // if a hq overlay was just loaded, store it with its new associated surface
-    if let Some(image_addr) = extract(&OVERLAY) {
-        OVERLAYS.lock().unwrap().insert(surface_addr, image_addr);
-    }
-
-    surface
-}
-
-pub extern "C" fn surface_bind_existing(
-    surface: *mut grim::Surface,
-    image: *const grim::Image,
-    width: i32,
-    height: i32,
-    param_4: u32,
-    param_5: u32,
-    param_6: u32,
-    param_7: u32,
-    texture_id: gl::Uint,
-) {
-    let surface_addr = SurfaceAddr(surface as usize);
-    if let Some(overlay) = extract(&OVERLAY) {
-        OVERLAYS.lock().unwrap().insert(surface_addr, overlay);
-    }
-
-    unsafe {
-        grim::surface_bind_existing(
-            surface, image, width, height, param_4, param_5, param_6, param_7, texture_id,
-        );
-    }
-}
-
-pub extern "C" fn manage_resource(resource: *mut grim::Resource) -> c_int {
-    let state = unsafe { (*resource).state };
-    let image_container_addr = ImageContainerAddr(unsafe { (*resource).image_container as usize });
-
-    if state == 2 {
-        let mut hq_image_containers = HQ_IMAGES.lock().unwrap();
-        let index = hq_image_containers.iter().position(|hq_image_container| {
-            hq_image_container.original_addr == image_container_addr
-        });
-        if let Some(index) = index {
-            HqImageContainer::deallocate(index, &mut hq_image_containers);
-        }
-    }
-
-    unsafe { grim::manage_resource(resource) }
-}
-
 fn is_drawing_hq(draw: *const grim::Draw) -> bool {
     let Some(surface) = drawing_surface(draw) else {
         return false;
@@ -717,7 +540,7 @@ fn is_drawing_hq(draw: *const grim::Draw) -> bool {
 }
 
 fn drawing_surface(draw: *const grim::Draw) -> Option<SurfaceAddr> {
-    unsafe { draw.as_ref() }.map(|draw| SurfaceAddr(draw.surfaces[0] as usize))
+    unsafe { draw.as_ref() }.map(|draw| SurfaceAddr::from_ptr(draw.surfaces[0]))
 }
 
 fn drawing_sampler(draw: *const grim::Draw) -> Option<gl::Uint> {
