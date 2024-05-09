@@ -37,6 +37,7 @@ pub fn hq_assets() {
         grim::surface_bind_existing
             .hook(bridge::surface_bind_existing as grim::SurfaceBindExisting);
         grim::setup_draw.hook(image::setup_draw as grim::SetupDraw);
+        gl::delete_textures.hook(bridge::delete_textures as gl::DeleteTextures);
     };
 }
 

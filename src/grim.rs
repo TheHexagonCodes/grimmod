@@ -30,9 +30,9 @@ fns! {
     #[address(0xE5EC0)]
     extern "C" fn copy_image(
         dst_image: *mut Image,
-        dst_surface: *mut c_void,
+        dst_surface: *mut Surface,
         src_image: *mut Image,
-        src_surface: *mut c_void,
+        src_surface: *mut Surface,
         x: u32,
         y: u32,
         param_7: u32,

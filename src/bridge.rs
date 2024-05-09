@@ -1,6 +1,6 @@
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
-use std::ffi::{c_char, c_int, c_uint, c_void, CStr};
+use std::ffi::{c_char, c_int, c_uint, CStr};
 use std::sync::Mutex;
 
 use crate::debug;
@@ -207,6 +207,10 @@ pub extern "C" fn manage_resource(resource: *mut grim::Resource) -> c_int {
 
 /// Hooks decompression to track an image through the system
 pub extern "C" fn decompress_image(image: *const grim::Image) {
+    if debug::verbose() {
+        debug::info(format!("Decompressing {}", ImageAddr::from_ptr(image).name()));
+    }
+
     // store the address of the last image decompressed
     // it will shortly be copied to the clean buffer and rendered
     *DECOMPRESSED.lock().unwrap() = Some(ImageAddr::from_ptr(image));
@@ -222,9 +226,9 @@ fn active_smush_frame_size() -> Option<(i32, i32)> {
 /// Hooks image copying to detect when a background or overlay is being interacted with
 pub extern "C" fn copy_image(
     dst_image: *mut grim::Image,
-    dst_surface: *mut c_void,
+    dst_surface: *mut grim::Surface,
     src_image: *mut grim::Image,
-    src_surface: *mut c_void,
+    src_surface: *mut grim::Surface,
     x: u32,
     y: u32,
     param_7: u32,
@@ -306,5 +310,15 @@ pub extern "C" fn surface_bind_existing(
         grim::surface_bind_existing(
             surface, image, width, height, param_4, param_5, param_6, param_7, texture_id,
         )
+    };
+}
+
+/// Hooks texture deletion to clear out any bound HQ overlays
+pub extern "stdcall" fn delete_textures(n: gl::Sizei, textures: *const gl::Uint) {
+    let surface_addr = SurfaceAddr(textures as usize - 0x20);
+    OVERLAYS.lock().unwrap().remove(&surface_addr);
+
+    unsafe {
+        gl::delete_textures(n, textures)
     };
 }

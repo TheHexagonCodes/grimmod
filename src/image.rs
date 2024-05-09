@@ -602,10 +602,6 @@ pub extern "C" fn setup_draw(draw: *mut grim::Draw, index_buffer: *const c_void)
                 gl::blend_func_separate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA, 1, 0);
             }
         }
-
-        // once an overlay has been drawn, remove it from the list of overlays
-        // if an overlay lasts for many frames, it will get reloaded every frame with a new surface
-        OVERLAYS.lock().unwrap().remove(&surface);
     }
 }
 

@@ -21,6 +21,8 @@ fn_refs! {
     );
     #[address(0x1713EC)]
     extern "stdcall" fn pixel_storei(pname: Enum, param: Int);
+    #[address(0x171420)]
+    extern "stdcall" fn delete_textures(n: Sizei, textures: *const Uint);
     #[address(0x2E84064)]
     extern "stdcall" fn sampler_parameteri(sampler: Uint, pname: Enum, param: Int);
     #[address(0x2E8360C)]
