@@ -3,6 +3,7 @@ use std::ffi::CString;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 
+use crate::config::Config;
 use crate::grim;
 
 const LOG_FILENAME: &str = "grimmod.log";
@@ -38,4 +39,8 @@ pub fn gl<T: AsRef<str>>(message: T) -> Option<()> {
         grim::marker(message.as_ref().len(), cmessage.as_ptr());
     }
     Some(())
+}
+
+pub fn verbose() -> bool {
+    Config::get().debug.verbose
 }

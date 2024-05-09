@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_uint, c_void, CStr};
 use std::sync::Mutex;
 
+use crate::debug;
 use crate::gl;
 use crate::grim;
 use crate::image;
@@ -47,12 +48,32 @@ impl ImageAddr {
         self.0 == unsafe { grim::CLEAN_BUFFER.inner_addr() }
     }
 
+    pub fn is_clean_z_buffer(&self) -> bool {
+        self.0 == unsafe { grim::CLEAN_Z_BUFFER.inner_addr() }
+    }
+
     pub fn is_back_buffer(&self) -> bool {
         self.0 == unsafe { grim::BACK_BUFFER.addr() }
     }
 
     pub fn is_smush_buffer(&self) -> bool {
         self.0 == unsafe { grim::SMUSH_BUFFER.inner_addr() }
+    }
+
+    pub fn name(&self) -> String {
+        if self.is_decompression_buffer() {
+            "DECOMPRESSION_BUFFER".to_string()
+        } else if self.is_clean_buffer() {
+            "CLEAN_BUFFER".to_string()
+        } else if self.is_clean_z_buffer() {
+            "CLEAN_Z_BUFFER".to_string()
+        } else if self.is_back_buffer() {
+            "BACK_BUFFER".to_string()
+        } else if self.is_smush_buffer() {
+            "SMUSH_BUFFER".to_string()
+        } else {
+            format!("unknown/dynamic buffer (0x{:x})", self.0)
+        }
     }
 }
 
@@ -209,7 +230,17 @@ pub extern "C" fn copy_image(
     param_7: u32,
     param_8: u32,
 ) {
+    let src_image_addr = ImageAddr::from_ptr(src_image);
     let dst_image_addr = ImageAddr::from_ptr(dst_image);
+
+    if debug::verbose() {
+        debug::info(format!(
+            "Copying {} to {}",
+            src_image_addr.name(),
+            dst_image_addr.name(),
+        ));
+    }
+
     let src_image_addr = ImageAddr::original(src_image).unwrap_or(ImageAddr(0));
 
     // an image being copied to the clean buffer first means it is a background (or draws

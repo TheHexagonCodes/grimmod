@@ -8,6 +8,8 @@ pub struct Config {
     pub mods: bool,
     #[serde(default = "Display::new")]
     pub display: Display,
+    #[serde(default = "Debug::new")]
+    pub debug: Debug,
 }
 
 impl Config {
@@ -15,6 +17,7 @@ impl Config {
         Config {
             mods: true,
             display: Display::new(),
+            debug: Debug::new(),
         }
     }
 
@@ -66,6 +69,18 @@ impl Renderer {
             hq_assets: true,
             quick_toggle: true,
         }
+    }
+}
+
+#[derive(Clone, serde::Deserialize)]
+pub struct Debug {
+    #[serde(default = "default_false")]
+    pub verbose: bool,
+}
+
+impl Debug {
+    pub fn new() -> Debug {
+        Debug { verbose: false }
     }
 }
 

@@ -92,6 +92,7 @@ fns! {
 // buffers used for backgrounds and overlays
 pub static mut DECOMPRESSION_BUFFER: Value<*const Image> = Value::new(0x1691C78);
 pub static mut CLEAN_BUFFER: Value<*const Image> = Value::new(0x1691C7C);
+pub static mut CLEAN_Z_BUFFER: Value<*const Image> = Value::new(0x1691C80);
 pub static mut BACK_BUFFER: Value<Image> = Value::new(0x31B4DA0);
 pub static mut SMUSH_BUFFER: Value<*const Image> = Value::new(0x16A8474);
 pub static mut ACTIVE_SMUSH_FRAME: Value<*const SmushFrame> = Value::new(0x1714B98);
