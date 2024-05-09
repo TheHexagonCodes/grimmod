@@ -567,7 +567,10 @@ pub extern "C" fn setup_draw(draw: *mut grim::Draw, index_buffer: *const c_void)
             // for hq images, use a linear texture filter for better quality
             gl::sampler_parameteri(sampler, gl::TEXTURE_MIN_FILTER, gl::LINEAR as gl::Int);
             gl::sampler_parameteri(sampler, gl::TEXTURE_MAG_FILTER, gl::LINEAR as gl::Int);
-            gl::blend_func_separate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA, 1, 0);
+
+            if Some(surface) != bitmap_underlays_surface() {
+                gl::blend_func_separate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA, 1, 0);
+            }
         }
 
         // once an overlay has been drawn, remove it from the list of overlays
