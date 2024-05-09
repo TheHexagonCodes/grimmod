@@ -1,4 +1,5 @@
 use once_cell::sync::Lazy;
+use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ffi::{c_uint, CString};
 use std::path::Path;
@@ -13,7 +14,8 @@ use crate::gl;
 use crate::grim;
 
 pub static BACKGROUND: Mutex<Option<Background>> = Mutex::new(None);
-pub static BACKGROUND_SNAPSHOT: Mutex<Option<Background>> = Mutex::new(None);
+pub static BACKGROUND_WRITES: Lazy<Mutex<HashMap<(u32, u32), (u32, u32)>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 pub static TARGET: Mutex<Option<Target>> = Mutex::new(None);
 
 pub static HQ_IMAGES: Lazy<Mutex<Vec<HqImageContainer>>> = Lazy::new(|| Mutex::new(Vec::new()));
@@ -181,11 +183,11 @@ impl HqImage {
         original_addr: ImageAddr,
         hq_images: &mut MutexGuard<Vec<HqImageContainer>>,
         mut some: SF,
-        none: NF,
+        mut none: NF,
     ) -> R
     where
         SF: FnMut(&mut HqImage) -> R,
-        NF: Fn() -> R,
+        NF: FnMut(&mut MutexGuard<Vec<HqImageContainer>>) -> R,
     {
         let hq_image = hq_images.iter_mut().find_map(|hq_image_container| {
             hq_image_container
@@ -195,7 +197,7 @@ impl HqImage {
         });
         match hq_image {
             Some(hq_image) => some(hq_image),
-            None => none(),
+            None => none(hq_images),
         }
     }
 
@@ -203,10 +205,12 @@ impl HqImage {
         let width = self.width;
         let height = self.height;
         let scale = self.scale;
+        let original_addr = self.original_addr;
         self.data.get_or_wait(|buffer, _| Background {
             width,
             height,
             scale,
+            original_addr,
             buffer: buffer.to_vec(),
         })
     }
@@ -256,11 +260,11 @@ impl HqImageAsyncData {
     }
 }
 
-#[derive(Clone)]
 pub struct Background {
     pub width: u32,
     pub height: u32,
     pub scale: u32,
+    pub original_addr: ImageAddr,
     pub buffer: Vec<u8>,
 }
 
@@ -275,7 +279,9 @@ impl Background {
                 image_addr,
                 &mut hq_images,
                 |overlay| Background::animate(x, y, overlay),
-                Background::restore,
+                |hq_images| {
+                    Background::restore(x, y, hq_images);
+                },
             );
         }
     }
@@ -286,7 +292,7 @@ impl Background {
             // before writing the first frame of an animation, save a snapshot of the bg
             // this will be restored as the background once the animation ends
             if overlay.index == 0 {
-                background.save();
+                background.save(x, y, overlay.width, overlay.height);
             }
             background.overlay(x, y, overlay);
         }
@@ -295,14 +301,18 @@ impl Background {
     fn set_from_image(image_addr: ImageAddr, hq_images: &mut MutexGuard<Vec<HqImageContainer>>) {
         *BACKGROUND.lock().unwrap() =
             HqImage::map_loaded(image_addr, hq_images, HqImage::to_background_mut);
-        *BACKGROUND_SNAPSHOT.lock().unwrap() = None;
+        *BACKGROUND_WRITES.lock().unwrap() = HashMap::new();
     }
 
-    fn restore() {
-        let background = BACKGROUND_SNAPSHOT.lock().unwrap().take();
-        if background.is_some() {
-            *BACKGROUND.lock().unwrap() = background;
-        }
+    fn restore(x: u32, y: u32, hq_images: &mut MutexGuard<Vec<HqImageContainer>>) -> Option<()> {
+        let mut background_guard = BACKGROUND.lock().unwrap();
+        let background = background_guard.as_mut()?;
+        let (width, height) = BACKGROUND_WRITES.lock().unwrap().remove(&(x, y))?;
+
+        HqImage::map_loaded(background.original_addr, hq_images, |hq_background| {
+            background.copy_from(hq_background, x, y, width, height);
+            Some(())
+        })
     }
 
     fn blend_pixels(background: (u8, u8, u8, u8), foreground: (u8, u8, u8, u8)) -> (u8, u8, u8) {
@@ -316,8 +326,28 @@ impl Background {
         (r as u8, g as u8, b as u8)
     }
 
-    fn save(&self) {
-        *BACKGROUND_SNAPSHOT.lock().unwrap() = Some(self.clone());
+    fn save(&self, x: u32, y: u32, width: u32, height: u32) {
+        BACKGROUND_WRITES
+            .lock()
+            .unwrap()
+            .insert((x, y), (width, height));
+    }
+
+    fn copy_from(&mut self, image: &mut HqImage, x: u32, y: u32, width: u32, height: u32) {
+        let x = (x * self.scale) as usize;
+        let y = (y * self.scale) as usize;
+        let full_width = self.width as usize;
+        image.data.get_or_wait(|image_buffer, _| {
+            let bytes_per_pixel = 4;
+            let bytes_width = width as usize * bytes_per_pixel;
+            let full_bytes_width = full_width * bytes_per_pixel;
+            for i in 0..height as usize {
+                let start = ((y + i) * full_bytes_width) + (x * bytes_per_pixel);
+                let src_slice = &image_buffer[start..start + bytes_width];
+                let dst_slice = &mut self.buffer[start..start + bytes_width];
+                dst_slice.copy_from_slice(src_slice);
+            }
+        });
     }
 
     fn overlay(&mut self, x: u32, y: u32, overlay: &mut HqImage) {
@@ -468,7 +498,7 @@ fn with_target_hq_image<F: FnMut(TargetMut)>(mut f: F) {
             *image_addr,
             &mut hq_images,
             |hq_image| f(TargetMut::Image(hq_image)),
-            || {},
+            |_| {},
         ),
         _ => {}
     }
