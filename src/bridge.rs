@@ -50,6 +50,10 @@ impl ImageAddr {
     pub fn is_back_buffer(&self) -> bool {
         self.0 == unsafe { grim::BACK_BUFFER.addr() }
     }
+
+    pub fn is_smush_buffer(&self) -> bool {
+        self.0 == unsafe { grim::SMUSH_BUFFER.inner_addr() }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
@@ -189,6 +193,11 @@ pub extern "C" fn decompress_image(image: *const grim::Image) {
     unsafe { grim::decompress_image(image) }
 }
 
+fn active_smush_frame_size() -> Option<(i32, i32)> {
+    let frame = unsafe { grim::ACTIVE_SMUSH_FRAME.inner_ref() }?;
+    Some((frame.attributes.width, frame.attributes.height))
+}
+
 /// Hooks image copying to detect when a background or overlay is being interacted with
 pub extern "C" fn copy_image(
     dst_image: *mut grim::Image,
@@ -209,11 +218,18 @@ pub extern "C" fn copy_image(
         image::Background::write(src_image_addr, x, y);
     }
 
-    // if an image is being written directly to the back buffer then it's an overlay
-    // temporarily store the image address as the next surface bound will be for it
     if dst_image_addr.is_back_buffer() {
-        *PREPARING_OVERLAY.lock().unwrap() =
-            image::HqImage::is_loaded(src_image_addr).then_some(src_image_addr);
+        // remove any HQ background if a fullscreen video plays as it will cover it
+        // these are not true cutscenes and don't change the scene
+        if src_image_addr.is_smush_buffer() && active_smush_frame_size() == Some((640, 480)) {
+            *image::BACKGROUND.lock().unwrap() = None;
+        }
+        // if an image is being written directly to the back buffer and it is not a then it's an overlay
+        // temporarily store the image address as the next surface bound will be for it
+        else {
+            *PREPARING_OVERLAY.lock().unwrap() =
+                image::HqImage::is_loaded(src_image_addr).then_some(src_image_addr);
+        }
     }
 
     unsafe {

@@ -93,6 +93,8 @@ fns! {
 pub static mut DECOMPRESSION_BUFFER: Value<*const Image> = Value::new(0x1691C78);
 pub static mut CLEAN_BUFFER: Value<*const Image> = Value::new(0x1691C7C);
 pub static mut BACK_BUFFER: Value<Image> = Value::new(0x31B4DA0);
+pub static mut SMUSH_BUFFER: Value<*const Image> = Value::new(0x16A8474);
+pub static mut ACTIVE_SMUSH_FRAME: Value<*const SmushFrame> = Value::new(0x1714B98);
 // backgrounds' render pass data
 pub static mut BITMAP_UNDERLAYS_RENDER_PASS: Value<*const RenderPass> = Value::new(0x30861E4);
 pub static mut VIRTUAL_DEPTH_RENDER_PASS: Value<*const RenderPass> = Value::new(0x3086304);
@@ -263,4 +265,10 @@ pub struct Resource {
     pub kind: *const c_char,
     pub image_container: *const ImageContainer,
     pub size: isize,
+}
+
+#[repr(C)]
+pub struct SmushFrame {
+    pub buffer: *mut c_void,
+    pub attributes: ImageAttributes,
 }
