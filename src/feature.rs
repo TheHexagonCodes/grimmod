@@ -32,10 +32,8 @@ pub fn hq_assets() {
         grim::copy_image.hook(bridge::copy_image as grim::CopyImage);
         grim::decompress_image.hook(bridge::decompress_image as grim::DecompressImage);
 
+        grim::bind_image_surface.hook(bridge::bind_image_surface as grim::BindImageSurface);
         grim::surface_upload.hook(image::surface_upload as grim::SurfaceUpload);
-        grim::surface_allocate.hook(bridge::surface_allocate as grim::SurfaceAllocate);
-        grim::surface_bind_existing
-            .hook(bridge::surface_bind_existing as grim::SurfaceBindExisting);
         grim::setup_draw.hook(image::setup_draw as grim::SetupDraw);
         gl::delete_textures.hook(bridge::delete_textures as gl::DeleteTextures);
     };

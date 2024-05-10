@@ -1,6 +1,6 @@
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
-use std::ffi::{c_char, c_int, c_uint, CStr};
+use std::ffi::{c_char, c_int, CStr};
 use std::sync::Mutex;
 
 use crate::debug;
@@ -9,7 +9,6 @@ use crate::grim;
 use crate::image;
 
 pub static DECOMPRESSED: Mutex<Option<ImageAddr>> = Mutex::new(None);
-pub static PREPARING_OVERLAY: Mutex<Option<ImageAddr>> = Mutex::new(None);
 pub static OVERLAYS: Lazy<Mutex<HashMap<SurfaceAddr, ImageAddr>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
@@ -31,13 +30,17 @@ impl ImageAddr {
     }
 
     /// Gets the original image address before decompression
-    pub fn original(image: *const grim::Image) -> Option<ImageAddr> {
+    pub fn original(image: *const grim::Image) -> ImageAddr {
         let image_addr = ImageAddr::from_ptr(image);
         if image_addr.is_decompression_buffer() {
-            extract(&DECOMPRESSED)
+            DECOMPRESSED.lock().unwrap().unwrap_or(image_addr)
         } else {
-            Some(image_addr)
+            image_addr
         }
+    }
+
+    pub fn underlying(&self) -> usize {
+        self.0
     }
 
     pub fn is_decompression_buffer(&self) -> bool {
@@ -150,18 +153,6 @@ impl Image {
     }
 }
 
-fn extract<T>(mutex: &Mutex<Option<T>>) -> Option<T> {
-    mutex.lock().ok()?.take()
-}
-
-/// Stores an image/surface pair if an HQ overlay was just prepared
-pub fn pair_overlay_surface(surface: *const grim::Surface) {
-    let surface_addr = SurfaceAddr(surface as usize);
-    if let Some(overlay) = extract(&PREPARING_OVERLAY) {
-        OVERLAYS.lock().unwrap().insert(surface_addr, overlay);
-    }
-}
-
 /// Removes all HQ overlay pairs owned by dropped HQ container
 pub fn unpair_overlay_surfaces(hq_image_container: &image::HqImageContainer) {
     let mut overlays = OVERLAYS.lock().unwrap();
@@ -208,7 +199,10 @@ pub extern "C" fn manage_resource(resource: *mut grim::Resource) -> c_int {
 /// Hooks decompression to track an image through the system
 pub extern "C" fn decompress_image(image: *const grim::Image) {
     if debug::verbose() {
-        debug::info(format!("Decompressing {}", ImageAddr::from_ptr(image).name()));
+        debug::info(format!(
+            "Decompressing {}",
+            ImageAddr::from_ptr(image).name()
+        ));
     }
 
     // store the address of the last image decompressed
@@ -245,7 +239,7 @@ pub extern "C" fn copy_image(
         ));
     }
 
-    let src_image_addr = ImageAddr::original(src_image).unwrap_or(ImageAddr(0));
+    let src_image_addr = ImageAddr::original(src_image);
 
     // an image being copied to the clean buffer first means it is a background (or draws
     // over the background) about to be rendered
@@ -258,12 +252,6 @@ pub extern "C" fn copy_image(
         // these are not true cutscenes and don't change the scene
         if src_image_addr.is_smush_buffer() && active_smush_frame_size() == Some((640, 480)) {
             *image::BACKGROUND.lock().unwrap() = None;
-        }
-        // if an image is being written directly to the back buffer and it is not a then it's an overlay
-        // temporarily store the image address as the next surface bound will be for it
-        else {
-            *PREPARING_OVERLAY.lock().unwrap() =
-                image::HqImage::is_loaded(src_image_addr).then_some(src_image_addr);
         }
     }
 
@@ -281,36 +269,25 @@ pub extern "C" fn copy_image(
     }
 }
 
-/// Hooks surface allocation to link dynamic surfaces to their HQ overlays
-pub extern "C" fn surface_allocate(
-    width: c_int,
-    height: c_int,
-    format: c_uint,
-    param_4: c_int,
-) -> *const grim::Surface {
-    let surface = unsafe { grim::surface_allocate(width, height, format, param_4) };
-    pair_overlay_surface(surface);
-    surface
-}
-
-/// Hooks surface reuse to link dynamic surfaces to their HQ overlays
-pub extern "C" fn surface_bind_existing(
-    surface: *mut grim::Surface,
-    image: *const grim::Image,
-    width: i32,
-    height: i32,
+/// Hooks surface binding to associate surfaces with HQ overlays
+pub extern "C" fn bind_image_surface(
+    image: *mut grim::Image,
+    param_2: u32,
+    param_3: u32,
     param_4: u32,
-    param_5: u32,
-    param_6: u32,
-    param_7: u32,
-    texture_id: gl::Uint,
-) {
-    pair_overlay_surface(surface);
-    unsafe {
-        grim::surface_bind_existing(
-            surface, image, width, height, param_4, param_5, param_6, param_7, texture_id,
-        )
-    };
+) -> *mut grim::Surface {
+    let image_addr = ImageAddr::original(image);
+    let is_hq = image::HqImage::is_loaded(image_addr);
+    let surface = unsafe { grim::bind_image_surface(image, param_2, param_3, param_4) };
+    let surface_addr = SurfaceAddr::from_ptr(surface);
+
+    if is_hq {
+        OVERLAYS.lock().unwrap().insert(surface_addr, image_addr);
+    } else {
+        OVERLAYS.lock().unwrap().remove(&surface_addr);
+    }
+
+    surface
 }
 
 /// Hooks texture deletion to clear out any bound HQ overlays
@@ -318,7 +295,5 @@ pub extern "stdcall" fn delete_textures(n: gl::Sizei, textures: *const gl::Uint)
     let surface_addr = SurfaceAddr(textures as usize - 0x20);
     OVERLAYS.lock().unwrap().remove(&surface_addr);
 
-    unsafe {
-        gl::delete_textures(n, textures)
-    };
+    unsafe { gl::delete_textures(n, textures) };
 }

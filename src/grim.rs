@@ -1,7 +1,6 @@
 #![allow(improper_ctypes, non_upper_case_globals)]
 
 use std::ffi::{c_char, c_int, c_uint, c_void, CStr};
-use windows::Win32::Foundation::BOOL;
 
 use crate::fns;
 use crate::gl;
@@ -46,30 +45,12 @@ fns! {
     #[address(0x2B340)]
     extern "C" fn manage_resource(resource: *mut Resource) -> c_int;
 
+    // Gets the surface for an image, creating it if necessary
+    #[address(0x13E010)]
+    extern "C" fn bind_image_surface(image: *mut Image, param_2: u32, param_3: u32, param_4: u32) -> *mut Surface;
+
     #[address(0xE8A80)]
     extern "C" fn surface_upload(surface: *mut Surface, image_data: *mut c_void);
-
-    // Allocate a new surface (texture) with a given width/height
-    #[address(0xECF70)]
-    extern "C" fn surface_allocate(
-        width: c_int,
-        height: c_int,
-        format: c_uint,
-        param_4: c_int
-    ) -> *const Surface;
-
-    #[address(0x12ED20)]
-    extern "C" fn surface_bind_existing(
-        surface: *mut Surface,
-        image: *const Image,
-        width: i32,
-        height: i32,
-        param_4: u32,
-        param_5: u32,
-        param_6: u32,
-        param_7: u32,
-        texture_id: gl::Uint,
-    );
 
     #[address(0xF3540)]
     extern "C" fn setup_draw(draw: *mut Draw, index_buffer: *const c_void);
@@ -81,9 +62,6 @@ fns! {
         software_surface: *const Surface,
         transition: f32
     );
-
-    #[address(0x23590)]
-    extern "C" fn is_paused() -> BOOL;
 
     #[address(0xEA1B0)]
     extern "C" fn marker(len: usize, message: *const c_char);
@@ -98,9 +76,7 @@ pub static mut SMUSH_BUFFER: Value<*const Image> = Value::new(0x16A8474);
 pub static mut ACTIVE_SMUSH_FRAME: Value<*const SmushFrame> = Value::new(0x1714B98);
 // backgrounds' render pass data
 pub static mut BITMAP_UNDERLAYS_RENDER_PASS: Value<*const RenderPass> = Value::new(0x30861E4);
-pub static mut VIRTUAL_DEPTH_RENDER_PASS: Value<*const RenderPass> = Value::new(0x3086304);
 pub static mut RENDERING_MODE: Value<f32> = Value::new(0x2E81230);
-pub static mut DEFERRED_RENDERER_ACTIVE: Value<BOOL> = Value::new(0x2E83488);
 pub static mut GAME_WINDOW: Value<*const c_void> = Value::new(0x2E81244);
 
 /// LLVM's libc++ std::vector
