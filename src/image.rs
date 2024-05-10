@@ -583,7 +583,7 @@ pub extern "C" fn setup_draw(draw: *mut grim::Draw, index_buffer: *const c_void)
 
     // for hq images, use a custom shader that keeps the full resolution
     if hq && let Some(draw) = unsafe { draw.as_mut() } {
-        draw.shader = *BACKGROUND_SHADER as *const grim::Shader;
+        unsafe { grim::set_draw_shader(draw, *BACKGROUND_SHADER as *mut grim::Shader) };
     }
 
     unsafe {

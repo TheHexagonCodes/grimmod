@@ -52,6 +52,8 @@ fns! {
     #[address(0xE8A80)]
     extern "C" fn surface_upload(surface: *mut Surface, image_data: *mut c_void);
 
+    #[address(0xE8FB0)]
+    extern "C" fn set_draw_shader(draw: *mut Draw, shader: *mut Shader);
     #[address(0xF3540)]
     extern "C" fn setup_draw(draw: *mut Draw, index_buffer: *const c_void);
     #[address(0xF2000)]
