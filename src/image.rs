@@ -59,6 +59,11 @@ impl HqImageContainer {
         let hq_images = HqImage::open_image(name, &images)
             .or_else(|| HqImage::open_animation(name, &images))?;
 
+        if debug::verbose() {
+            let addrs: Vec<_> = hq_images.iter().map(HqImage::format_addr).collect();
+            debug::info(format!("Opened HQ {} ({})", name, addrs.join(", ")));
+        }
+
         Some(HqImageContainer {
             name: name.to_string(),
             original_addr: image_container.original_addr,
@@ -138,7 +143,7 @@ impl HqImage {
                 .zip(images)
                 .enumerate()
                 .map(|(i, (dst, image))| HqImage {
-                    name: format!("{} ({:02})", name, i),
+                    name: format!("{} ({:02})", name, i + 1),
                     index: i,
                     width,
                     height,
@@ -148,6 +153,12 @@ impl HqImage {
                 })
                 .collect(),
         )
+    }
+
+    pub fn name(image_addr: ImageAddr) -> Option<String> {
+        HqImage::map_loaded(image_addr, &mut HQ_IMAGES.lock().unwrap(), |hq_image| {
+            Some(hq_image.name.clone())
+        })
     }
 
     pub fn is_loaded(addr: ImageAddr) -> bool {
@@ -214,6 +225,10 @@ impl HqImage {
             buffer: buffer.to_vec(),
         })
     }
+
+    fn format_addr(&self) -> String {
+        format!("0x{:x}", self.original_addr.underlying())
+    }
 }
 
 pub enum HqImageState {
@@ -271,13 +286,16 @@ pub struct Background {
 impl Background {
     /// Write (or draw over) the HQ background
     pub fn write(image_addr: ImageAddr, x: u32, y: u32) {
-        let mut hq_images = HQ_IMAGES.lock().unwrap();
         if x == 0 && y == 0 {
-            Background::set_from_image(image_addr, &mut hq_images);
+            if debug::verbose() {
+                let name = HqImage::name(image_addr).unwrap_or_default();
+                debug::info(format!("Setting {} as background", name));
+            }
+            Background::set_from_image(image_addr, &mut HQ_IMAGES.lock().unwrap());
         } else {
             HqImage::with_loaded_or_else(
                 image_addr,
-                &mut hq_images,
+                &mut HQ_IMAGES.lock().unwrap(),
                 |overlay| Background::animate(x, y, overlay),
                 |hq_images| {
                     Background::restore(x, y, hq_images);

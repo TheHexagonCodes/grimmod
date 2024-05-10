@@ -29,18 +29,17 @@ impl ImageAddr {
         ImageAddr(ptr as usize)
     }
 
-    /// Gets the original image address before decompression
-    pub fn original(image: *const grim::Image) -> ImageAddr {
-        let image_addr = ImageAddr::from_ptr(image);
-        if image_addr.is_decompression_buffer() {
-            DECOMPRESSED.lock().unwrap().unwrap_or(image_addr)
-        } else {
-            image_addr
-        }
-    }
-
     pub fn underlying(&self) -> usize {
         self.0
+    }
+
+    /// Gets the original image address before decompression
+    pub fn original(&self) -> ImageAddr {
+        if self.is_decompression_buffer() {
+            DECOMPRESSED.lock().unwrap().unwrap_or(*self)
+        } else {
+            *self
+        }
     }
 
     pub fn is_decompression_buffer(&self) -> bool {
@@ -65,7 +64,7 @@ impl ImageAddr {
 
     pub fn name(&self) -> String {
         if self.is_decompression_buffer() {
-            "DECOMPRESSION_BUFFER".to_string()
+            format!("DECOMPRESSION_BUFFER aka {}", self.original().name())
         } else if self.is_clean_buffer() {
             "CLEAN_BUFFER".to_string()
         } else if self.is_clean_z_buffer() {
@@ -74,6 +73,8 @@ impl ImageAddr {
             "BACK_BUFFER".to_string()
         } else if self.is_smush_buffer() {
             "SMUSH_BUFFER".to_string()
+        } else if let Some(name) = image::HqImage::name(*self) {
+            name
         } else {
             format!("unknown/dynamic buffer (0x{:x})", self.0)
         }
@@ -239,7 +240,7 @@ pub extern "C" fn copy_image(
         ));
     }
 
-    let src_image_addr = ImageAddr::original(src_image);
+    let src_image_addr = ImageAddr::from_ptr(src_image).original();
 
     // an image being copied to the clean buffer first means it is a background (or draws
     // over the background) about to be rendered
@@ -276,12 +277,19 @@ pub extern "C" fn bind_image_surface(
     param_3: u32,
     param_4: u32,
 ) -> *mut grim::Surface {
-    let image_addr = ImageAddr::original(image);
+    let image_addr = ImageAddr::from_ptr(image).original();
     let is_hq = image::HqImage::is_loaded(image_addr);
     let surface = unsafe { grim::bind_image_surface(image, param_2, param_3, param_4) };
     let surface_addr = SurfaceAddr::from_ptr(surface);
 
     if is_hq {
+        if debug::verbose() {
+            debug::info(format!(
+                "Binding {} to surface 0x{:x}",
+                image_addr.name(),
+                surface_addr.0
+            ));
+        }
         OVERLAYS.lock().unwrap().insert(surface_addr, image_addr);
     } else {
         OVERLAYS.lock().unwrap().remove(&surface_addr);
