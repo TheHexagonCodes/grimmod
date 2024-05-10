@@ -127,7 +127,7 @@ impl HqImage {
             width,
             height,
             scale: width / image.width as u32,
-            original_addr: image.original_addr,
+            original_addr: image.addr,
             data,
         }])
     }
@@ -148,7 +148,7 @@ impl HqImage {
                     width,
                     height,
                     scale: width / image.width as u32,
-                    original_addr: image.original_addr,
+                    original_addr: image.addr,
                     data: dst,
                 })
                 .collect(),
@@ -287,16 +287,16 @@ pub struct Background {
 
 impl Background {
     /// Write (or draw over) the HQ background
-    pub fn write(image_addr: ImageAddr, x: u32, y: u32) {
-        if x == 0 && y == 0 {
+    pub fn write(image: Image, x: u32, y: u32) {
+        if x == 0 && y == 0 && image.width == 640 && image.height == 480 {
             if debug::verbose() {
-                let name = HqImage::name(image_addr).unwrap_or_default();
+                let name = HqImage::name(image.addr).unwrap_or_default();
                 debug::info(format!("Setting {} as background", name));
             }
-            Background::set_from_image(image_addr, &mut HQ_IMAGES.lock().unwrap());
+            Background::set_from_image(image.addr, &mut HQ_IMAGES.lock().unwrap());
         } else {
             HqImage::with_loaded_or_else(
-                image_addr,
+                image.addr,
                 &mut HQ_IMAGES.lock().unwrap(),
                 |overlay| Background::animate(x, y, overlay),
                 |hq_images| {

@@ -33,6 +33,10 @@ impl ImageAddr {
         self.0
     }
 
+    pub fn image(&self) -> Option<Image> {
+        Image::from_raw(self.0 as *const _)
+    }
+
     /// Gets the original image address before decompression
     pub fn original(&self) -> ImageAddr {
         if self.is_decompression_buffer() {
@@ -135,18 +139,18 @@ impl<'a> ImageContainer<'a> {
 }
 
 pub struct Image {
-    pub original_addr: ImageAddr,
+    pub addr: ImageAddr,
     pub width: i32,
     pub height: i32,
 }
 
 impl Image {
     pub fn from_raw(image: *const grim::Image) -> Option<Image> {
-        let original_addr = ImageAddr::from_ptr(image);
+        let addr = ImageAddr::from_ptr(image);
         unsafe { image.as_ref() }.map(|raw| {
             let (width, height) = (raw.attributes.width, raw.attributes.height);
             Image {
-                original_addr,
+                addr,
                 width,
                 height,
             }
@@ -245,7 +249,9 @@ pub extern "C" fn copy_image(
     // an image being copied to the clean buffer first means it is a background (or draws
     // over the background) about to be rendered
     if dst_image_addr.is_clean_buffer() {
-        image::Background::write(src_image_addr, x, y);
+        if let Some(src_image) = src_image_addr.image() {
+            image::Background::write(src_image, x, y);
+        }
     }
 
     if dst_image_addr.is_back_buffer() {
