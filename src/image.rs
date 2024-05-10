@@ -14,7 +14,7 @@ use crate::gl;
 use crate::grim;
 
 pub static BACKGROUND: Mutex<Option<Background>> = Mutex::new(None);
-pub static BACKGROUND_WRITES: Lazy<Mutex<HashMap<(u32, u32), (u32, u32)>>> =
+pub static BACKGROUND_WRITES: Lazy<Mutex<BackgroundWrites>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 pub static TARGET: Mutex<Option<Target>> = Mutex::new(None);
 
@@ -274,6 +274,8 @@ impl HqImageAsyncData {
         }
     }
 }
+
+pub type BackgroundWrites = HashMap<(u32, u32), (u32, u32)>;
 
 pub struct Background {
     pub width: u32,
