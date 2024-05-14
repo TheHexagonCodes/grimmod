@@ -1,6 +1,6 @@
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
-use std::ffi::{c_char, c_int, CStr};
+use std::ffi::{c_char, c_int, c_uint, CStr};
 use std::sync::Mutex;
 
 use crate::debug;
@@ -92,6 +92,21 @@ impl SurfaceAddr {
     pub fn from_ptr(ptr: *const grim::Surface) -> SurfaceAddr {
         SurfaceAddr(ptr as usize)
     }
+
+    /// Return the address for the background render pass's surface
+    pub fn bitmap_underlays() -> Option<SurfaceAddr> {
+        unsafe {
+            let render_pass = grim::BITMAP_UNDERLAYS_RENDER_PASS.inner_ref();
+            let render_pass_data =
+                render_pass.and_then(|render_pass| render_pass.entities.data().first());
+            let surface = render_pass_data.map(|render_pass_data| render_pass_data.surface);
+            surface.map(SurfaceAddr::from_ptr)
+        }
+    }
+
+    pub fn is_bitmap_underlays(&self) -> bool {
+        Some(self) == SurfaceAddr::bitmap_underlays().as_ref()
+    }
 }
 
 pub struct ImageContainer<'a> {
@@ -155,6 +170,30 @@ impl Image {
                 height,
             }
         })
+    }
+}
+
+pub struct Draw {
+    pub addr: usize,
+    pub surface: SurfaceAddr,
+    pub sampler: gl::Uint,
+}
+
+impl Draw {
+    pub fn from_raw(raw: *mut grim::Draw) -> Option<Draw> {
+        let addr = raw as usize;
+        unsafe { raw.as_ref() }.map(|draw| {
+            Draw {
+                addr,
+                surface: SurfaceAddr::from_ptr(draw.surfaces[0]),
+                sampler: draw.samplers[0] as c_uint
+            }
+        })
+    }
+
+    pub fn is_hq(&self) -> bool {
+        (self.surface.is_bitmap_underlays() && image::BACKGROUND.lock().unwrap().is_some())
+            || OVERLAYS.lock().unwrap().contains_key(&self.surface)
     }
 }
 

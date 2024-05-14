@@ -1,13 +1,13 @@
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::ffi::{c_uint, CString};
+use std::ffi::CString;
 use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 
 use crate::animation;
-use crate::bridge::{Image, ImageAddr, ImageContainer, ImageContainerAddr, SurfaceAddr, OVERLAYS};
+use crate::bridge::{Draw, Image, ImageAddr, ImageContainer, ImageContainerAddr, SurfaceAddr, OVERLAYS};
 use crate::debug;
 use crate::file;
 use crate::gl;
@@ -425,17 +425,6 @@ impl Background {
     }
 }
 
-/// Return the address for the background render pass's surface
-fn bitmap_underlays_surface() -> Option<SurfaceAddr> {
-    unsafe {
-        let render_pass = grim::BITMAP_UNDERLAYS_RENDER_PASS.inner_ref();
-        let render_pass_data =
-            render_pass.and_then(|render_pass| render_pass.entities.data().first());
-        let surface = render_pass_data.map(|render_pass_data| render_pass_data.surface);
-        surface.map(SurfaceAddr::from_ptr)
-    }
-}
-
 /// Prepare a surface (aka texture) for uploading to the GPU or upload it now
 ///
 /// This is an overload for a native function that will be hooked
@@ -469,7 +458,7 @@ pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c
 }
 
 fn get_target(surface_addr: SurfaceAddr) -> Option<Target> {
-    if bitmap_underlays_surface() == Some(surface_addr) {
+    if surface_addr.is_bitmap_underlays() {
         BACKGROUND
             .lock()
             .unwrap()
@@ -558,31 +547,14 @@ extern "stdcall" fn hq_pixel_storei(pname: gl::Enum, param: gl::Int) {
     })
 }
 
-fn is_drawing_hq(draw: *const grim::Draw) -> bool {
-    let Some(surface) = drawing_surface(draw) else {
-        return false;
-    };
-
-    (Some(surface) == bitmap_underlays_surface() && BACKGROUND.lock().unwrap().is_some())
-        || OVERLAYS.lock().unwrap().contains_key(&surface)
-}
-
-fn drawing_surface(draw: *const grim::Draw) -> Option<SurfaceAddr> {
-    unsafe { draw.as_ref() }.map(|draw| SurfaceAddr::from_ptr(draw.surfaces[0]))
-}
-
-fn drawing_sampler(draw: *const grim::Draw) -> Option<gl::Uint> {
-    unsafe { draw.as_ref() }.map(|draw| draw.samplers[0] as c_uint)
-}
-
 /// Sets the OpenGL state for the next draw call
 ///
 /// This is an overload for a native function that will be hooked
 pub extern "C" fn setup_draw(draw: *mut grim::Draw, index_buffer: *const c_void) {
-    let hq = is_drawing_hq(draw);
+    let hq_draw = Draw::from_raw(draw).filter(|draw| draw.is_hq());
 
     // for hq images, use a custom shader that keeps the full resolution
-    if hq && let Some(draw) = unsafe { draw.as_mut() } {
+    if hq_draw.is_some() {
         unsafe { grim::set_draw_shader(draw, *BACKGROUND_SHADER as *mut grim::Shader) };
     }
 
@@ -590,13 +562,13 @@ pub extern "C" fn setup_draw(draw: *mut grim::Draw, index_buffer: *const c_void)
         grim::setup_draw(draw, index_buffer);
     }
 
-    if hq && let (Some(surface), Some(sampler)) = (drawing_surface(draw), drawing_sampler(draw)) {
+    if let Some(hq_draw) = hq_draw {
         unsafe {
             // for hq images, use a linear texture filter for better quality
-            gl::sampler_parameteri(sampler, gl::TEXTURE_MIN_FILTER, gl::LINEAR as gl::Int);
-            gl::sampler_parameteri(sampler, gl::TEXTURE_MAG_FILTER, gl::LINEAR as gl::Int);
+            gl::sampler_parameteri(hq_draw.sampler, gl::TEXTURE_MIN_FILTER, gl::LINEAR as gl::Int);
+            gl::sampler_parameteri(hq_draw.sampler, gl::TEXTURE_MAG_FILTER, gl::LINEAR as gl::Int);
 
-            if Some(surface) != bitmap_underlays_surface() {
+            if !hq_draw.surface.is_bitmap_underlays() {
                 gl::blend_func_separate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA, 1, 0);
             }
         }
