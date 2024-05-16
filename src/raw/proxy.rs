@@ -6,7 +6,7 @@ use windows::Win32::Foundation::{HMODULE, MAX_PATH};
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
 use windows::Win32::System::SystemInformation::GetSystemDirectoryA;
 
-use crate::gl;
+use crate::raw::gl;
 
 macro_rules! proxy {
     (fn $name:ident($($arg_name:ident : $arg_ty:ty),*)) => {
@@ -40,7 +40,7 @@ proxy!(fn gluTessNormal(tess: *mut c_void, x: f64, y: f64, z: f64));
 proxy!(fn gluTessCallback(tess: *mut c_void, which: c_uint, cb: *mut c_void));
 proxy!(fn gluTessVertex(tess: *mut c_void, location: *mut f64, data: *mut c_void));
 
-proxy!(fn glGetError() -> crate::gl::Enum);
+proxy!(fn glGetError() -> gl::Enum);
 proxy!(fn glDrawArrays(mode: gl::Enum, first: gl::Int, count: gl::Sizei));
 proxy!(fn glStencilFunc(func: gl::Enum, ref_value: gl::Int, mask: gl::Uint));
 proxy!(fn glStencilOp(sfail: gl::Enum, dpfail: gl::Enum, dppass: gl::Enum));

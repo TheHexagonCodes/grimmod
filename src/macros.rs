@@ -10,8 +10,8 @@ macro_rules! fns {
             pub type [<$name:camel>] =
                 extern $conv fn($($arg: $arg_ty),*) $(-> $ret)?;
 
-            pub static mut $name: $crate::process::DirectFn<[<$name:camel>]> =
-                $crate::process::DirectFn::new(stringify!($name), $addr);
+            pub static mut $name: $crate::raw::memory::DirectFn<[<$name:camel>]> =
+                $crate::raw::memory::DirectFn::new(stringify!($name), $addr);
         })*
     };
 }
@@ -28,8 +28,8 @@ macro_rules! fn_refs {
             pub type [<$name:camel>] =
                 extern $conv fn($($arg: $arg_ty),*) $(-> $ret)?;
 
-            pub static mut $name: $crate::process::IndirectFn<[<$name:camel>]> =
-                $crate::process::IndirectFn::new(stringify!($name), $addr);
+            pub static mut $name: $crate::raw::memory::IndirectFn<[<$name:camel>]> =
+                $crate::raw::memory::IndirectFn::new(stringify!($name), $addr);
         })*
     };
 }

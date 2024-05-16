@@ -5,7 +5,7 @@ use windows::Win32::Foundation::{BOOL, HMODULE, HWND};
 use windows::Win32::Graphics::Gdi::HDC;
 
 use crate::fn_refs;
-pub use crate::proxy::{
+pub use crate::raw::proxy::{
     glClear as clear, glColorMask as color_mask, glDepthMask as depth_mask,
     glDrawArrays as draw_arrays, glGetError as get_error, glStencilFunc as stencil_func,
     glStencilMask as stencil_mask, glStencilOp as stencil_op,

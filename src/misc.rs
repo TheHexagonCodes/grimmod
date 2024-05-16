@@ -5,8 +5,7 @@ use windows::Win32::Graphics::Gdi::MonitorFromWindow;
 use windows::Win32::Graphics::Gdi::{MONITORINFO, MONITOR_DEFAULTTONEAREST};
 use windows::Win32::UI::WindowsAndMessaging::SetProcessDPIAware;
 
-use crate::gl;
-use crate::grim;
+use crate::raw::{gl, grim};
 
 /// Get the game's screen's size and position
 pub fn screen_bounds() -> Option<gl::Rect> {

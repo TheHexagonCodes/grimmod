@@ -4,12 +4,9 @@ mod config;
 mod debug;
 mod feature;
 mod file;
-mod gl;
-mod grim;
 mod macros;
 mod misc;
-mod process;
-mod proxy;
+mod raw;
 mod renderer;
 
 use std::ffi::c_void;
@@ -22,7 +19,7 @@ fn main() {
 
     debug::info(format!(
         "Base memory address found: 0x{:x}",
-        *process::BASE_ADDRESS
+        *raw::memory::BASE_ADDRESS
     ));
 
     feature::mods();
@@ -41,7 +38,7 @@ pub extern "system" fn DllMain(
     if fdw_reason == DLL_PROCESS_ATTACH {
         unsafe {
             let _ = DisableThreadLibraryCalls(hinstance);
-            proxy::attach();
+            raw::proxy::attach();
         }
         main();
     }

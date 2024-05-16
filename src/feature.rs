@@ -1,9 +1,7 @@
 use crate::config::Config;
-use crate::file;
-use crate::gl;
-use crate::grim;
-use crate::misc;
-use crate::renderer;
+use crate::{file, misc};
+use crate::raw::{grim, gl};
+use crate::renderer::graphics;
 
 /// Overload native IO functions to load modded files
 pub fn mods() {
@@ -25,20 +23,20 @@ pub fn hq_assets() {
     }
 
     unsafe {
-        grim::open_bm_image.hook(renderer::graphics::open_bm_image as grim::OpenBmImage);
-        grim::manage_resource.hook(renderer::graphics::manage_resource as grim::ManageResource);
-        grim::copy_image.hook(renderer::graphics::copy_image as grim::CopyImage);
-        grim::decompress_image.hook(renderer::graphics::decompress_image as grim::DecompressImage);
+        grim::open_bm_image.hook(graphics::open_bm_image as grim::OpenBmImage);
+        grim::manage_resource.hook(graphics::manage_resource as grim::ManageResource);
+        grim::copy_image.hook(graphics::copy_image as grim::CopyImage);
+        grim::decompress_image.hook(graphics::decompress_image as grim::DecompressImage);
 
-        grim::bind_image_surface.hook(renderer::graphics::bind_image_surface as grim::BindImageSurface);
-        grim::surface_upload.hook(renderer::graphics::surface_upload as grim::SurfaceUpload);
-        grim::setup_draw.hook(renderer::graphics::setup_draw as grim::SetupDraw);
-        gl::delete_textures.hook(renderer::graphics::delete_textures as gl::DeleteTextures);
+        grim::bind_image_surface.hook(graphics::bind_image_surface as grim::BindImageSurface);
+        grim::surface_upload.hook(graphics::surface_upload as grim::SurfaceUpload);
+        grim::setup_draw.hook(graphics::setup_draw as grim::SetupDraw);
+        gl::delete_textures.hook(graphics::delete_textures as gl::DeleteTextures);
 
         if Config::get().display.renderer.video_cutouts {
-            grim::init_gfx.hook(renderer::graphics::init_gfx as grim::InitGfx);
+            grim::init_gfx.hook(graphics::init_gfx as grim::InitGfx);
             grim::draw_indexed_primitives
-                .hook(renderer::graphics::draw_indexed_primitives as grim::DrawIndexedPrimitives);
+                .hook(graphics::draw_indexed_primitives as grim::DrawIndexedPrimitives);
         }
     };
 }

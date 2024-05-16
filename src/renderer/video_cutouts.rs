@@ -2,7 +2,7 @@
 
 use std::sync::Mutex;
 
-use crate::gl;
+use crate::raw::gl;
 
 pub struct StencilBuffer {
     renderbuffer: gl::Uint,

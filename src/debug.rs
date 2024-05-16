@@ -4,7 +4,7 @@ use std::fs::{File, OpenOptions};
 use std::io::Write;
 
 use crate::config::Config;
-use crate::{gl, grim};
+use crate::raw::{gl, grim};
 
 const LOG_FILENAME: &str = "grimmod.log";
 

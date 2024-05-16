@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use crate::debug;
-use crate::grim;
+use crate::raw::grim;
 
 // The game guards the file handle list with a mutex so that is replicated here out of caution.
 // It also guards every individual file access with a mutex but that isn't needed here.
