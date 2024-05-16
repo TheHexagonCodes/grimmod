@@ -3,7 +3,6 @@ use crate::config::Config;
 use crate::file;
 use crate::gl;
 use crate::grim;
-use crate::image;
 use crate::misc;
 
 /// Overload native IO functions to load modded files
@@ -32,8 +31,8 @@ pub fn hq_assets() {
         grim::decompress_image.hook(bridge::decompress_image as grim::DecompressImage);
 
         grim::bind_image_surface.hook(bridge::bind_image_surface as grim::BindImageSurface);
-        grim::surface_upload.hook(image::surface_upload as grim::SurfaceUpload);
-        grim::setup_draw.hook(image::setup_draw as grim::SetupDraw);
+        grim::surface_upload.hook(bridge::surface_upload as grim::SurfaceUpload);
+        grim::setup_draw.hook(bridge::setup_draw as grim::SetupDraw);
         gl::delete_textures.hook(bridge::delete_textures as gl::DeleteTextures);
 
         if Config::get().display.renderer.video_cutouts {

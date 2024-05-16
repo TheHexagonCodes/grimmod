@@ -359,6 +359,45 @@ pub extern "stdcall" fn delete_textures(n: gl::Sizei, textures: *const gl::Uint)
     unsafe { gl::delete_textures(n, textures) };
 }
 
+/// Hooks draw preparation to set state for HQ images
+pub extern "C" fn setup_draw(draw: *mut grim::Draw, index_buffer: *const c_void) {
+    let hq_draw = Draw::from_raw(draw).filter(|draw| draw.is_hq());
+
+    // for hq images, use a custom shader that keeps the full resolution
+    if hq_draw.is_some() {
+        unsafe {
+            grim::set_draw_shader(
+                draw,
+                grim::TEXTURED_QUAD_SHADER.inner_addr() as *mut grim::Shader,
+            )
+        };
+    }
+
+    unsafe {
+        grim::setup_draw(draw, index_buffer);
+    }
+
+    if let Some(hq_draw) = hq_draw {
+        unsafe {
+            // for hq images, use a linear texture filter for better quality
+            gl::sampler_parameteri(
+                hq_draw.sampler,
+                gl::TEXTURE_MIN_FILTER,
+                gl::LINEAR as gl::Int,
+            );
+            gl::sampler_parameteri(
+                hq_draw.sampler,
+                gl::TEXTURE_MAG_FILTER,
+                gl::LINEAR as gl::Int,
+            );
+
+            if !hq_draw.surface.is_bitmap_underlays() {
+                gl::blend_func_separate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA, 1, 0);
+            }
+        }
+    }
+}
+
 /// Hooks the main draw call batch to detect a video that needs cutouts
 pub extern "C" fn draw_indexed_primitives(
     draw: *mut grim::Draw,
@@ -403,4 +442,90 @@ pub extern "C" fn init_gfx() -> u8 {
         video_cutouts::create_stencil_buffer();
     }
     result
+}
+
+/// Hooks texture uploads swap out regular assets for their HQ versions
+pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c_void) {
+    let surface_addr = SurfaceAddr::from_ptr(surface);
+    let target = image::get_target(surface_addr);
+
+    if target.is_none() {
+        return unsafe {
+            // call with null to reset the buffer size as it might have been changed by a hq image
+            if !image_data.is_null() {
+                grim::surface_upload(surface, std::ptr::null_mut());
+            }
+            grim::surface_upload(surface, image_data);
+        };
+    }
+
+    if image_data.is_null() {
+        return;
+    }
+
+    *image::TARGET.lock().unwrap() = target;
+    unsafe {
+        gl::tex_image_2d.hook(hq_tex_image_2d as gl::TexImage2d);
+        gl::pixel_storei.hook(hq_pixel_storei as gl::PixelStorei);
+        grim::surface_upload(surface, std::ptr::null_mut());
+        gl::pixel_storei.unhook();
+        gl::tex_image_2d.unhook();
+    }
+    *image::TARGET.lock().unwrap() = None;
+}
+
+extern "stdcall" fn hq_tex_image_2d(
+    _target: gl::Enum,
+    _level: gl::Int,
+    _internalformat: gl::Int,
+    _width: gl::Sizei,
+    _height: gl::Sizei,
+    _border: gl::Int,
+    _format: gl::Enum,
+    _typ: gl::Enum,
+    _data: *const c_void,
+) {
+    fn tex_image_2d(width: u32, height: u32, ptr: *const u8) {
+        unsafe {
+            gl::tex_image_2d(
+                gl::TEXTURE_2D,
+                0,
+                gl::RGBA8 as gl::Int,
+                width as gl::Int,
+                height as gl::Int,
+                0,
+                gl::RGBA,
+                gl::UNSIGNED_BYTE,
+                ptr as *const _,
+            )
+        }
+    }
+    image::with_target_hq_image(|target_ref| match target_ref {
+        image::TargetMut::Background(background) => tex_image_2d(
+            background.width,
+            background.height,
+            background.buffer.as_ptr(),
+        ),
+        image::TargetMut::Image(hq_image) => {
+            let width = hq_image.width;
+            let height = hq_image.height;
+            hq_image
+                .data
+                .get_or_wait(|buffer, _| tex_image_2d(width, height, buffer.as_ptr()));
+        }
+    })
+}
+
+extern "stdcall" fn hq_pixel_storei(pname: gl::Enum, param: gl::Int) {
+    image::with_target_hq_image(|target_ref| unsafe {
+        if pname == gl::UNPACK_ROW_LENGTH {
+            let width = match target_ref {
+                image::TargetMut::Background(background) => background.width,
+                image::TargetMut::Image(hq_image) => hq_image.width,
+            };
+            gl::pixel_storei(gl::UNPACK_ROW_LENGTH, width as gl::Int);
+        } else {
+            gl::pixel_storei(pname, param);
+        }
+    })
 }

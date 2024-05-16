@@ -1,13 +1,12 @@
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
-use std::ffi::c_void;
 use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 
 use crate::bridge::{Image, ImageAddr, ImageContainer, ImageContainerAddr, SurfaceAddr, OVERLAYS};
 use crate::config::Config;
-use crate::{animation, debug, file, gl, grim, video_cutouts};
+use crate::{animation, debug, file, video_cutouts};
 
 pub static BACKGROUND: Mutex<Option<Background>> = Mutex::new(None);
 pub static BACKGROUND_WRITES: Lazy<Mutex<BackgroundWrites>> =
@@ -252,7 +251,7 @@ impl HqImageAsyncData {
         self.raw.1.notify_all();
     }
 
-    fn get_or_wait<F, R>(&mut self, mut f: F) -> Option<R>
+    pub fn get_or_wait<F, R>(&mut self, mut f: F) -> Option<R>
     where
         F: FnMut(&[u8], bool) -> R,
     {
@@ -429,39 +428,7 @@ impl Background {
     }
 }
 
-/// Prepare a surface (aka texture) for uploading to the GPU or upload it now
-///
-/// This is an overload for a native function that will be hooked
-pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c_void) {
-    let surface_addr = SurfaceAddr::from_ptr(surface);
-    let target = get_target(surface_addr);
-
-    if target.is_none() {
-        return unsafe {
-            // call with null to reset the buffer size as it might have been changed by a hq image
-            if !image_data.is_null() {
-                grim::surface_upload(surface, std::ptr::null_mut());
-            }
-            grim::surface_upload(surface, image_data);
-        };
-    }
-
-    if image_data.is_null() {
-        return;
-    }
-
-    *TARGET.lock().unwrap() = target;
-    unsafe {
-        gl::tex_image_2d.hook(hq_tex_image_2d as gl::TexImage2d);
-        gl::pixel_storei.hook(hq_pixel_storei as gl::PixelStorei);
-        grim::surface_upload(surface, std::ptr::null_mut());
-        gl::pixel_storei.unhook();
-        gl::tex_image_2d.unhook();
-    }
-    *TARGET.lock().unwrap() = None;
-}
-
-fn get_target(surface_addr: SurfaceAddr) -> Option<Target> {
+pub fn get_target(surface_addr: SurfaceAddr) -> Option<Target> {
     if surface_addr.is_bitmap_underlays() {
         BACKGROUND
             .lock()
@@ -478,7 +445,7 @@ fn get_target(surface_addr: SurfaceAddr) -> Option<Target> {
     }
 }
 
-fn with_target_hq_image<F: FnMut(TargetMut)>(mut f: F) {
+pub fn with_target_hq_image<F: FnMut(TargetMut)>(mut f: F) {
     let mut background = BACKGROUND.lock().unwrap();
     let mut hq_images = HQ_IMAGES.lock().unwrap();
     match TARGET.lock().unwrap().as_mut() {
@@ -492,89 +459,5 @@ fn with_target_hq_image<F: FnMut(TargetMut)>(mut f: F) {
             |_| {},
         ),
         _ => {}
-    }
-}
-
-extern "stdcall" fn hq_tex_image_2d(
-    _target: gl::Enum,
-    _level: gl::Int,
-    _internalformat: gl::Int,
-    _width: gl::Sizei,
-    _height: gl::Sizei,
-    _border: gl::Int,
-    _format: gl::Enum,
-    _typ: gl::Enum,
-    _data: *const c_void,
-) {
-    fn tex_image_2d(width: u32, height: u32, ptr: *const u8) {
-        unsafe {
-            gl::tex_image_2d(
-                gl::TEXTURE_2D,
-                0,
-                gl::RGBA8 as gl::Int,
-                width as gl::Int,
-                height as gl::Int,
-                0,
-                gl::RGBA,
-                gl::UNSIGNED_BYTE,
-                ptr as *const _,
-            )
-        }
-    }
-    with_target_hq_image(|target_ref| match target_ref {
-        TargetMut::Background(background) => tex_image_2d(
-            background.width,
-            background.height,
-            background.buffer.as_ptr(),
-        ),
-        TargetMut::Image(hq_image) => {
-            let width = hq_image.width;
-            let height = hq_image.height;
-            hq_image
-                .data
-                .get_or_wait(|buffer, _| tex_image_2d(width, height, buffer.as_ptr()));
-        }
-    })
-}
-
-extern "stdcall" fn hq_pixel_storei(pname: gl::Enum, param: gl::Int) {
-    with_target_hq_image(|target_ref| unsafe {
-        if pname == gl::UNPACK_ROW_LENGTH {
-            let width = match target_ref {
-                TargetMut::Background(background) => background.width,
-                TargetMut::Image(hq_image) => hq_image.width,
-            };
-            gl::pixel_storei(gl::UNPACK_ROW_LENGTH, width as gl::Int);
-        } else {
-            gl::pixel_storei(pname, param);
-        }
-    })
-}
-
-/// Sets the OpenGL state for the next draw call
-///
-/// This is an overload for a native function that will be hooked
-pub extern "C" fn setup_draw(draw: *mut grim::Draw, index_buffer: *const c_void) {
-    let hq_draw = Draw::from_raw(draw).filter(|draw| draw.is_hq());
-
-    // for hq images, use a custom shader that keeps the full resolution
-    if hq_draw.is_some() {
-        unsafe { grim::set_draw_shader(draw, *BACKGROUND_SHADER as *mut grim::Shader) };
-    }
-
-    unsafe {
-        grim::setup_draw(draw, index_buffer);
-    }
-
-    if let Some(hq_draw) = hq_draw {
-        unsafe {
-            // for hq images, use a linear texture filter for better quality
-            gl::sampler_parameteri(hq_draw.sampler, gl::TEXTURE_MIN_FILTER, gl::LINEAR as gl::Int);
-            gl::sampler_parameteri(hq_draw.sampler, gl::TEXTURE_MAG_FILTER, gl::LINEAR as gl::Int);
-
-            if !hq_draw.surface.is_bitmap_underlays() {
-                gl::blend_func_separate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA, 1, 0);
-            }
-        }
     }
 }

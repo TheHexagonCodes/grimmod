@@ -47,13 +47,17 @@ fns! {
     #[address(0x13E010)]
     extern "C" fn bind_image_surface(image: *mut Image, param_2: u32, param_3: u32, param_4: u32) -> *mut Surface;
 
+    // Prepare a surface (aka texture) for uploading to the GPU or upload it now
     #[address(0xE8A80)]
     extern "C" fn surface_upload(surface: *mut Surface, image_data: *mut c_void);
 
     #[address(0xE8FB0)]
     extern "C" fn set_draw_shader(draw: *mut Draw, shader: *mut Shader);
+
+    // Sets all the OpenGL state for the next draw call
     #[address(0xF3540)]
     extern "C" fn setup_draw(draw: *mut Draw, index_buffer: *const c_void);
+
     #[address(0xF91C0)]
     extern "C" fn draw_software_scene(
         draw: *const Draw,
