@@ -27,6 +27,8 @@ fn main() {
     feature::quick_toggle();
     feature::vsync();
     feature::hdpi_fix();
+
+    misc::validate_mods();
 }
 
 #[no_mangle]

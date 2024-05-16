@@ -1,11 +1,58 @@
+use glob::glob;
+use semver::{Version, VersionReq};
 use std::ffi::{c_char, c_int, c_void};
+use std::fs::File;
+use std::io::Read;
 use windows::Win32::Foundation::BOOL;
 use windows::Win32::Graphics::Gdi::GetMonitorInfoW;
 use windows::Win32::Graphics::Gdi::MonitorFromWindow;
 use windows::Win32::Graphics::Gdi::{MONITORINFO, MONITOR_DEFAULTTONEAREST};
 use windows::Win32::UI::WindowsAndMessaging::SetProcessDPIAware;
 
+use crate::debug;
 use crate::raw::{gl, grim};
+
+const VERSION: Version = Version::new(1, 0, 0);
+
+#[derive(serde::Deserialize)]
+pub struct ModInfo {
+    pub name: String,
+    pub version: Version,
+    pub author: String,
+    pub contact: String,
+    pub homepage: String,
+    pub description: String,
+    pub grimmod_version: VersionReq,
+}
+
+pub fn validate_mods() {
+    let Ok(mod_infos) = glob("./Mods/*/info.json") else {
+        return;
+    };
+    for info_path in mod_infos {
+        let mut contents = String::new();
+        let info: Option<ModInfo> = info_path
+            .ok()
+            .and_then(|path| File::open(path).ok())
+            .and_then(|mut file| file.read_to_string(&mut contents).ok())
+            .and_then(|_| serde_json::from_str(&contents).ok());
+
+        if let Some(info) = info {
+            if info.grimmod_version.matches(&VERSION) {
+                debug::info(format!(
+                    "Mod validated: {} {} (by {} at {})",
+                    info.name, info.version, info.author, info.homepage
+                ));
+            } else {
+                debug::error(format!(
+                    "Mod failed validation: {} {} was made for grimmod {} but {} found.",
+                    info.name, info.version, info.grimmod_version, VERSION
+                ));
+                debug::error("Disable it if issues arise");
+            }
+        }
+    }
+}
 
 /// Get the game's screen's size and position
 pub fn screen_bounds() -> Option<gl::Rect> {
