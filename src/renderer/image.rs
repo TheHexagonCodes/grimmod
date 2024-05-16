@@ -4,10 +4,12 @@ use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 
-use crate::{debug, file};
 use crate::config::Config;
+use crate::renderer::graphics::{
+    Image, ImageAddr, ImageContainer, ImageContainerAddr, SurfaceAddr, OVERLAYS,
+};
 use crate::renderer::{animation, video_cutouts};
-use crate::renderer::graphics::{Image, ImageAddr, ImageContainer, ImageContainerAddr, SurfaceAddr, OVERLAYS};
+use crate::{debug, file};
 
 pub static BACKGROUND: Mutex<Option<Background>> = Mutex::new(None);
 pub static BACKGROUND_WRITES: Lazy<Mutex<BackgroundWrites>> =

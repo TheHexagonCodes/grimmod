@@ -1,7 +1,7 @@
 use crate::config::Config;
-use crate::{file, misc};
-use crate::raw::{grim, gl};
+use crate::raw::{gl, grim};
 use crate::renderer::graphics;
+use crate::{file, misc};
 
 /// Overload native IO functions to load modded files
 pub fn mods() {
