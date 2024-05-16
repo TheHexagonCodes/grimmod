@@ -330,7 +330,7 @@ impl Background {
     }
 
     pub fn is_stencilled_video_scene() -> bool {
-        if Config::get().display.renderer.video_cutouts
+        if Config::get().renderer.video_cutouts
             && let Some(background) = BACKGROUND.lock().unwrap().as_ref()
         {
             video_cutouts::triangles_for(&background.name).is_some()

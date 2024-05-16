@@ -18,7 +18,7 @@ pub fn mods() {
 
 /// Upgrade image loading and display pipeline to enable HD 32bit assets
 pub fn hq_assets() {
-    if !Config::get().mods || !Config::get().display.renderer.hq_assets {
+    if !Config::get().mods || !Config::get().renderer.hq_assets {
         return;
     }
 
@@ -33,7 +33,7 @@ pub fn hq_assets() {
         grim::setup_draw.hook(graphics::setup_draw as grim::SetupDraw);
         gl::delete_textures.hook(graphics::delete_textures as gl::DeleteTextures);
 
-        if Config::get().display.renderer.video_cutouts {
+        if Config::get().renderer.video_cutouts {
             grim::init_gfx.hook(graphics::init_gfx as grim::InitGfx);
             grim::draw_indexed_primitives
                 .hook(graphics::draw_indexed_primitives as grim::DrawIndexedPrimitives);
@@ -43,7 +43,7 @@ pub fn hq_assets() {
 
 /// Change the original/remaster renderer toggle to a binary rather than smooth transition
 pub fn quick_toggle() {
-    if !Config::get().display.renderer.quick_toggle {
+    if !Config::get().renderer.quick_toggle {
         return;
     }
 

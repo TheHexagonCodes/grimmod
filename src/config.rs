@@ -6,6 +6,8 @@ pub static CONFIG: Lazy<Config> = Lazy::new(Config::load);
 pub struct Config {
     #[serde(default = "default_true")]
     pub mods: bool,
+    #[serde(default = "Renderer::new")]
+    pub renderer: Renderer,
     #[serde(default = "Display::new")]
     pub display: Display,
     #[serde(default = "Debug::new")]
@@ -16,6 +18,7 @@ impl Config {
     pub fn new() -> Config {
         Config {
             mods: true,
+            renderer: Renderer::new(),
             display: Display::new(),
             debug: Debug::new(),
         }
@@ -37,8 +40,6 @@ impl Config {
 
 #[derive(Clone, serde::Deserialize)]
 pub struct Display {
-    #[serde(default = "Renderer::new")]
-    pub renderer: Renderer,
     #[serde(default = "default_true")]
     pub hdpi_fix: bool,
     #[serde(default = "default_true")]
@@ -48,7 +49,6 @@ pub struct Display {
 impl Display {
     pub fn new() -> Display {
         Display {
-            renderer: Renderer::new(),
             hdpi_fix: true,
             vsync: true,
         }
