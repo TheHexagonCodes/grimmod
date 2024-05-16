@@ -1,7 +1,6 @@
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::ffi::CString;
 use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
@@ -16,7 +15,6 @@ pub static BACKGROUND_WRITES: Lazy<Mutex<BackgroundWrites>> =
 pub static TARGET: Mutex<Option<Target>> = Mutex::new(None);
 
 pub static HQ_IMAGES: Lazy<Mutex<Vec<HqImageContainer>>> = Lazy::new(|| Mutex::new(Vec::new()));
-pub static BACKGROUND_SHADER: Lazy<usize> = Lazy::new(|| compile_background_shader() as usize);
 
 #[derive(Debug)]
 pub enum Target {
@@ -580,37 +578,3 @@ pub extern "C" fn setup_draw(draw: *mut grim::Draw, index_buffer: *const c_void)
         }
     }
 }
-
-pub fn compile_background_shader() -> *const grim::Shader {
-    let name = CString::new("grimmod_background").unwrap();
-    unsafe { grim::compile_shader(name.as_ptr()) }
-}
-
-pub static BACKGROUND_V_SHADER: &str = r#"
-    #version 330
-    layout(std140) uniform VSConstants {
-         vec4    MultiplyColor;     vec4    TexelSizeDesaturateGamma;     vec4    ColorKey;
-    } constantsV;
-    in vec3 vs_Position;
-    in vec2 vs_TexCoord;
-    out vec2 ps_TexCoordPx;
-    void main ()
-    {
-      gl_Position = vec4(vs_Position, 1.0);
-      ps_TexCoordPx = vs_TexCoord;
-    }
-"#;
-
-pub static BACKGROUND_P_SHADER: &str = r#"
-    #version 330
-    layout(std140) uniform PSConstants {
-         vec4    MultiplyColor;     vec4    TexelSizeDesaturateGamma;     vec4    ColorKey;
-    } constantsP;
-    uniform sampler2D ps_Texture0;
-    in vec2 ps_TexCoordPx;
-    out vec4 ps_Result;
-    void main ()
-    {
-      ps_Result = texture(ps_Texture0, ps_TexCoordPx);
-    }
-"#;

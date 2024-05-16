@@ -14,8 +14,6 @@ fns! {
     extern "C" fn close_file(file: *mut c_void) -> c_int;
     #[address(0x1E050)]
     extern "C" fn read_file(file: *mut c_void, dst: *mut c_void, size: usize) -> usize;
-    #[address(0xE6700)]
-    extern "C" fn read_all(dst: *mut *const c_void, size: *mut usize, filename: *const c_char);
 
     // Reads and parses a bitmap (.bm/.zbm) image into unified image container
     #[address(0xDADE0)]
@@ -56,8 +54,6 @@ fns! {
     extern "C" fn set_draw_shader(draw: *mut Draw, shader: *mut Shader);
     #[address(0xF3540)]
     extern "C" fn setup_draw(draw: *mut Draw, index_buffer: *const c_void);
-    #[address(0xF2000)]
-    extern "C" fn compile_shader(name: *const c_char) -> *const Shader;
     #[address(0xF91C0)]
     extern "C" fn draw_software_scene(
         draw: *const Draw,
@@ -94,6 +90,8 @@ pub static mut ACTIVE_SMUSH_FRAME: Value<*const SmushFrame> = Value::new(0x1714B
 pub static mut BITMAP_UNDERLAYS_RENDER_PASS: Value<*const RenderPass> = Value::new(0x30861E4);
 pub static mut RENDERING_MODE: Value<f32> = Value::new(0x2E81230);
 pub static mut GAME_WINDOW: Value<*const c_void> = Value::new(0x2E81244);
+
+pub static mut TEXTURED_QUAD_SHADER: Value<*const Shader> = Value::new(0x2E81848);
 
 /// LLVM's libc++ std::vector
 #[repr(C)]

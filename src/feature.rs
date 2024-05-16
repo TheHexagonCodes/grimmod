@@ -16,7 +16,6 @@ pub fn mods() {
         grim::open_file.hook(file::open as grim::OpenFile);
         grim::close_file.hook(file::close as grim::CloseFile);
         grim::read_file.hook(file::read as grim::ReadFile);
-        grim::read_all.hook(file::read_all as grim::ReadAll);
     }
 }
 

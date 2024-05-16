@@ -401,7 +401,6 @@ pub extern "C" fn init_gfx() -> u8 {
     let result = unsafe { grim::init_gfx() };
     if result == 1 {
         video_cutouts::create_stencil_buffer();
-        Lazy::force(&image::BACKGROUND_SHADER);
     }
     result
 }
