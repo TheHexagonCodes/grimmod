@@ -36,6 +36,12 @@ pub fn hq_assets() {
         grim::surface_upload.hook(image::surface_upload as grim::SurfaceUpload);
         grim::setup_draw.hook(image::setup_draw as grim::SetupDraw);
         gl::delete_textures.hook(bridge::delete_textures as gl::DeleteTextures);
+
+        if Config::get().display.renderer.video_cutouts {
+            grim::init_gfx.hook(bridge::init_gfx as grim::InitGfx);
+            grim::draw_indexed_primitives
+                .hook(bridge::draw_indexed_primitives as grim::DrawIndexedPrimitives);
+        }
     };
 }
 

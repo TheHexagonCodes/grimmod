@@ -61,6 +61,8 @@ pub struct Renderer {
     pub hq_assets: bool,
     #[serde(default = "default_true")]
     pub quick_toggle: bool,
+    #[serde(default = "default_true")]
+    pub video_cutouts: bool,
 }
 
 impl Renderer {
@@ -68,6 +70,7 @@ impl Renderer {
         Renderer {
             hq_assets: true,
             quick_toggle: true,
+            video_cutouts: true,
         }
     }
 }

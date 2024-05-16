@@ -13,6 +13,7 @@ mod macros;
 mod misc;
 mod process;
 mod proxy;
+mod video_cutouts;
 
 use std::ffi::c_void;
 use windows::Win32::Foundation::{BOOL, HMODULE};

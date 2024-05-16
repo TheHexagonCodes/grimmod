@@ -65,6 +65,20 @@ fns! {
         transition: f32
     );
 
+    // Draw the selected indexed primitives
+    #[address(0xF3890)]
+    extern "C" fn draw_indexed_primitives(
+        draw: *mut Draw,
+        param_2: u32,
+        param_3: u32,
+        param_4: u32,
+        param_5: u32
+    );
+
+    // Initialize the basic graphics components
+    #[address(0xF2960)]
+    extern "C" fn init_gfx() -> u8;
+
     #[address(0xEA1B0)]
     extern "C" fn marker(len: usize, message: *const c_char);
 }

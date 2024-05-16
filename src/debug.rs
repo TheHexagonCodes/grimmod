@@ -4,7 +4,7 @@ use std::fs::{File, OpenOptions};
 use std::io::Write;
 
 use crate::config::Config;
-use crate::grim;
+use crate::{gl, grim};
 
 const LOG_FILENAME: &str = "grimmod.log";
 
@@ -39,6 +39,12 @@ pub fn gl<T: AsRef<str>>(message: T) -> Option<()> {
         grim::marker(message.as_ref().len(), cmessage.as_ptr());
     }
     Some(())
+}
+
+#[allow(dead_code)]
+pub fn gl_error() -> Option<()> {
+    let gl_err = unsafe { gl::get_error() };
+    error(format!("OpenGL: {}", gl_err))
 }
 
 pub fn verbose() -> bool {

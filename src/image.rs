@@ -6,12 +6,9 @@ use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 
-use crate::animation;
-use crate::bridge::{Draw, Image, ImageAddr, ImageContainer, ImageContainerAddr, SurfaceAddr, OVERLAYS};
-use crate::debug;
-use crate::file;
-use crate::gl;
-use crate::grim;
+use crate::bridge::{Image, ImageAddr, ImageContainer, ImageContainerAddr, SurfaceAddr, OVERLAYS};
+use crate::config::Config;
+use crate::{animation, debug, file, gl, grim, video_cutouts};
 
 pub static BACKGROUND: Mutex<Option<Background>> = Mutex::new(None);
 pub static BACKGROUND_WRITES: Lazy<Mutex<BackgroundWrites>> =
@@ -213,15 +210,13 @@ impl HqImage {
     }
 
     fn to_background_mut(&mut self) -> Option<Background> {
-        let width = self.width;
-        let height = self.height;
-        let scale = self.scale;
-        let original_addr = self.original_addr;
+        video_cutouts::bind_for(&self.name);
         self.data.get_or_wait(|buffer, _| Background {
-            width,
-            height,
-            scale,
-            original_addr,
+            name: self.name.clone(),
+            width: self.width,
+            height: self.height,
+            scale: self.scale,
+            original_addr: self.original_addr,
             buffer: buffer.to_vec(),
         })
     }
@@ -278,6 +273,7 @@ impl HqImageAsyncData {
 pub type BackgroundWrites = HashMap<(u32, u32), (u32, u32)>;
 
 pub struct Background {
+    pub name: String,
     pub width: u32,
     pub height: u32,
     pub scale: u32,
@@ -333,6 +329,16 @@ impl Background {
             background.copy_from(hq_background, x, y, width, height);
             Some(())
         })
+    }
+
+    pub fn is_stencilled_video_scene() -> bool {
+        if Config::get().display.renderer.video_cutouts
+            && let Some(background) = BACKGROUND.lock().unwrap().as_ref()
+        {
+            video_cutouts::triangles_for(&background.name).is_some()
+        } else {
+            false
+        }
     }
 
     fn blend_pixels(background: (u8, u8, u8, u8), foreground: (u8, u8, u8, u8)) -> (u8, u8, u8) {

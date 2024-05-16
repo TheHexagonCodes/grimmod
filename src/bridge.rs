@@ -1,16 +1,14 @@
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
-use std::ffi::{c_char, c_int, c_uint, CStr};
+use std::ffi::{c_char, c_int, c_uint, c_void, CStr};
 use std::sync::Mutex;
 
-use crate::debug;
-use crate::gl;
-use crate::grim;
-use crate::image;
+use crate::{debug, gl, grim, image, video_cutouts};
 
 pub static DECOMPRESSED: Mutex<Option<ImageAddr>> = Mutex::new(None);
 pub static OVERLAYS: Lazy<Mutex<HashMap<SurfaceAddr, ImageAddr>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
+pub static SMUSH_SURFACE: Mutex<Option<SurfaceAddr>> = Mutex::new(None);
 
 #[derive(Clone, Copy, Default, Hash, Eq, PartialEq)]
 pub struct ImageContainerAddr(usize);
@@ -182,18 +180,20 @@ pub struct Draw {
 impl Draw {
     pub fn from_raw(raw: *mut grim::Draw) -> Option<Draw> {
         let addr = raw as usize;
-        unsafe { raw.as_ref() }.map(|draw| {
-            Draw {
-                addr,
-                surface: SurfaceAddr::from_ptr(draw.surfaces[0]),
-                sampler: draw.samplers[0] as c_uint
-            }
+        unsafe { raw.as_ref() }.map(|draw| Draw {
+            addr,
+            surface: SurfaceAddr::from_ptr(draw.surfaces[0]),
+            sampler: draw.samplers[0] as c_uint,
         })
     }
 
     pub fn is_hq(&self) -> bool {
         (self.surface.is_bitmap_underlays() && image::BACKGROUND.lock().unwrap().is_some())
             || OVERLAYS.lock().unwrap().contains_key(&self.surface)
+    }
+
+    pub fn is_smush(&self) -> bool {
+        Some(self.surface) == *SMUSH_SURFACE.lock().unwrap()
     }
 }
 
@@ -296,7 +296,11 @@ pub extern "C" fn copy_image(
     if dst_image_addr.is_back_buffer() {
         // remove any HQ background if a fullscreen video plays as it will cover it
         // these are not true cutscenes and don't change the scene
-        if src_image_addr.is_smush_buffer() && active_smush_frame_size() == Some((640, 480)) {
+        // this is unnecessary for scenes with cutout backgrounds
+        if src_image_addr.is_smush_buffer()
+            && active_smush_frame_size() == Some((640, 480))
+            && !image::Background::is_stencilled_video_scene()
+        {
             *image::BACKGROUND.lock().unwrap() = None;
         }
     }
@@ -327,6 +331,10 @@ pub extern "C" fn bind_image_surface(
     let surface = unsafe { grim::bind_image_surface(image, param_2, param_3, param_4) };
     let surface_addr = SurfaceAddr::from_ptr(surface);
 
+    if image_addr.is_smush_buffer() {
+        *SMUSH_SURFACE.lock().unwrap() = Some(surface_addr);
+    }
+
     if is_hq {
         if debug::verbose() {
             debug::info(format!(
@@ -349,4 +357,51 @@ pub extern "stdcall" fn delete_textures(n: gl::Sizei, textures: *const gl::Uint)
     OVERLAYS.lock().unwrap().remove(&surface_addr);
 
     unsafe { gl::delete_textures(n, textures) };
+}
+
+/// Hooks the main draw call batch to detect a video that needs cutouts
+pub extern "C" fn draw_indexed_primitives(
+    draw: *mut grim::Draw,
+    param_2: u32,
+    param_3: u32,
+    param_4: u32,
+    param_5: u32,
+) {
+    if image::Background::is_stencilled_video_scene()
+        && Draw::from_raw(draw).map_or(false, |draw| draw.is_smush())
+    {
+        unsafe {
+            gl::draw_elements_base_vertex
+                .hook(draw_elements_base_vertex as gl::DrawElementsBaseVertex);
+        }
+    }
+
+    unsafe { grim::draw_indexed_primitives(draw, param_2, param_3, param_4, param_5) }
+}
+
+/// Hooks the the opengl draw call for videos to perform a stencil test for cutouts
+pub extern "stdcall" fn draw_elements_base_vertex(
+    mode: gl::Enum,
+    count: gl::Sizei,
+    typ: gl::Enum,
+    indicies: *mut c_void,
+    basevertex: gl::Int,
+) {
+    unsafe {
+        video_cutouts::with_stencil(|| {
+            gl::draw_elements_base_vertex(mode, count, typ, indicies, basevertex);
+        });
+
+        gl::draw_elements_base_vertex.unhook();
+    }
+}
+
+/// Hooks the graphics initialization to create a stencil buffer for cutouts
+pub extern "C" fn init_gfx() -> u8 {
+    let result = unsafe { grim::init_gfx() };
+    if result == 1 {
+        video_cutouts::create_stencil_buffer();
+        Lazy::force(&image::BACKGROUND_SHADER);
+    }
+    result
 }
