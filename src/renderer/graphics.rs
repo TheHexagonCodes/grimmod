@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_uint, c_void, CStr};
 use std::sync::Mutex;
 
-use crate::{debug, gl, grim, image, video_cutouts};
+use crate::{debug, gl, grim};
+use crate::renderer::{image, video_cutouts};
 
 pub static DECOMPRESSED: Mutex<Option<ImageAddr>> = Mutex::new(None);
 pub static OVERLAYS: Lazy<Mutex<HashMap<SurfaceAddr, ImageAddr>>> =

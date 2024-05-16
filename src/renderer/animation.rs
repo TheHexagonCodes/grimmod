@@ -10,7 +10,7 @@ use webm_iterable::{
 };
 
 use crate::debug;
-use crate::image::HqImageAsyncData;
+use crate::renderer::image::HqImageAsyncData;
 
 struct Decoder {
     codec: vpx_sys::vpx_codec_ctx_t,

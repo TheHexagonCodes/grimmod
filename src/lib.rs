@@ -1,19 +1,16 @@
 #![feature(fn_traits, if_let_guard, let_chains, tuple_trait, unboxed_closures)]
 
-mod animation;
-mod bridge;
 mod config;
 mod debug;
 mod feature;
 mod file;
 mod gl;
 mod grim;
-mod image;
 mod macros;
 mod misc;
 mod process;
 mod proxy;
-mod video_cutouts;
+mod renderer;
 
 use std::ffi::c_void;
 use windows::Win32::Foundation::{BOOL, HMODULE};
