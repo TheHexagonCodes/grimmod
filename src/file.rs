@@ -20,7 +20,7 @@ extern "C" {
 
 /// Finds the path to a modded resource, if one exists
 pub fn find_modded(filename: &str) -> Option<PathBuf> {
-    let mut entries = glob(&format!("./Mods/*/resources/*/{}", filename.to_lowercase())).ok()?;
+    let mut entries = glob(&format!("./Mods/*/assets/*/{}", filename.to_lowercase())).ok()?;
     entries.next().map(Result::unwrap)
 }
 
