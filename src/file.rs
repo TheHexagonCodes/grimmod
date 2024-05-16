@@ -33,7 +33,9 @@ pub extern "C" fn open(raw_filename: *mut c_char, mode: *mut c_char) -> *mut c_v
     match find_modded(filename) {
         None => unsafe { grim::open_file(raw_filename, mode) },
         Some(path) => {
-            debug::info(format!("Opening modded file: {}", path.display()));
+            if debug::verbose() {
+                debug::info(format!("Opening modded {} file", path.display()));
+            }
 
             let raw_path = CString::new(path.to_str().unwrap()).unwrap().into_raw();
             let file = unsafe { fopen(raw_path, mode) };
