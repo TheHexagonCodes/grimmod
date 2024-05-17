@@ -1,5 +1,7 @@
 # GrimMod: Mod Loader for Grim Fandango Remastered
 
+Download at [https://hexagon.codes/grimhd](https://hexagon.codes/grimhd)
+
 ## Features
 
 * **Mods**
