@@ -10,8 +10,8 @@ pub struct Config {
     pub renderer: Renderer,
     #[serde(default = "Display::new")]
     pub display: Display,
-    #[serde(default = "Debug::new")]
-    pub debug: Debug,
+    #[serde(default = "Logging::new")]
+    pub logging: Logging,
 }
 
 impl Config {
@@ -20,7 +20,7 @@ impl Config {
             mods: true,
             renderer: Renderer::new(),
             display: Display::new(),
-            debug: Debug::new(),
+            logging: Logging::new(),
         }
     }
 
@@ -76,14 +76,14 @@ impl Renderer {
 }
 
 #[derive(Clone, serde::Deserialize)]
-pub struct Debug {
+pub struct Logging {
     #[serde(default = "default_false")]
-    pub verbose: bool,
+    pub debug: bool,
 }
 
-impl Debug {
-    pub fn new() -> Debug {
-        Debug { verbose: false }
+impl Logging {
+    pub fn new() -> Logging {
+        Logging { debug: false }
     }
 }
 

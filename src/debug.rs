@@ -53,5 +53,5 @@ pub fn gl_error() -> Option<u32> {
 }
 
 pub fn verbose() -> bool {
-    Config::get().debug.verbose
+    Config::get().logging.debug
 }
