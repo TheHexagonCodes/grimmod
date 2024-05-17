@@ -77,13 +77,18 @@ impl Renderer {
 
 #[derive(Clone, serde::Deserialize)]
 pub struct Logging {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     #[serde(default = "default_false")]
     pub debug: bool,
 }
 
 impl Logging {
     pub fn new() -> Logging {
-        Logging { debug: false }
+        Logging {
+            enabled: true,
+            debug: false,
+        }
     }
 }
 

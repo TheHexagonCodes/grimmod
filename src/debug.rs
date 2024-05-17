@@ -18,6 +18,10 @@ static LOG_FILE: Lazy<Option<File>> = Lazy::new(|| {
 });
 
 pub fn write<T: AsRef<str>>(message: T) -> Option<()> {
+    if !Config::get().logging.enabled {
+        return None;
+    }
+
     if let Some(mut log_file) = LOG_FILE.as_ref() {
         writeln!(log_file, "{}", message.as_ref()).ok()?;
     }
