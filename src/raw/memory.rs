@@ -1,8 +1,8 @@
+use lightningscanner::Scanner;
 use once_cell::sync::Lazy;
 use retour::RawDetour;
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::mem;
 use std::sync::Mutex;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::BOOL;
@@ -74,224 +74,19 @@ pub unsafe fn write<T: Sized>(address: usize, value: T) {
     });
 }
 
-pub struct DirectFn<F> {
-    pub name: &'static str,
-    pub relative_address: usize,
-    pub enabled: bool,
-    pub hook: Option<RawDetour>,
-    fn_type: PhantomData<F>,
-}
-
-impl<F> DirectFn<F> {
-    pub const fn new(name: &'static str, relative_address: usize) -> DirectFn<F> {
-        DirectFn {
-            name,
-            relative_address,
-            enabled: false,
-            hook: None,
-            fn_type: PhantomData,
-        }
-    }
-
-    pub unsafe fn prepare_hook(&mut self, replacement: F) {
-        let replacement_addr = *(&replacement as *const F as *const usize);
-        let hook = RawDetour::new(
-            relative_address(self.relative_address) as *const (),
-            replacement_addr as *const (),
-        );
-        match hook {
-            Ok(hook) => {
-                self.hook = Some(hook);
-            }
-            Err(error) => {
-                debug::error(format!("Could not hook function {}: {}", self.name, error));
-            }
-        }
-    }
-
-    pub unsafe fn enable_hook(&mut self) {
-        if let Some(hook) = &self.hook {
-            if let Err(error) = hook.enable() {
-                debug::error(format!(
-                    "Could not enable hook for function {}: {}",
-                    self.name, error
-                ));
-            } else {
-                self.enabled = true;
-            }
-        }
-    }
-
-    pub unsafe fn hook(&mut self, replacement: F) {
-        self.prepare_hook(replacement);
-        self.enable_hook();
-    }
-
-    pub unsafe fn fn_addr(&self) -> usize {
-        if self.enabled
-            && let Some(hook) = &self.hook
-        {
-            hook.trampoline() as *const _ as usize
-        } else {
-            relative_address(self.relative_address)
-        }
-    }
-}
-
-macro_rules! impl_direct_extern_fn_traits {
-    ($conv:literal, $($T:ident),*) => {
-        #[allow(non_snake_case)]
-        impl<$($T,)* R> FnOnce<($($T,)*)> for DirectFn<extern $conv fn($($T,)*) -> R> {
-            type Output = R;
-
-            extern "rust-call" fn call_once(self, ($($T,)*): ($($T,)*)) -> R {
-                let f: extern $conv fn($($T,)*) -> R = unsafe { mem::transmute(self.fn_addr()) };
-                (f)($($T,)*)
-            }
-        }
-
-        #[allow(non_snake_case)]
-        impl<$($T, )* R> FnMut<($($T,)*)> for DirectFn<extern $conv fn($($T,)*) -> R> {
-            extern "rust-call" fn call_mut(&mut self, ($($T,)*): ($($T,)*)) -> R {
-                let f: extern $conv fn($($T,)*) -> R = unsafe { mem::transmute(self.fn_addr()) };
-                (f)($($T,)*)
-            }
-        }
-
-        #[allow(non_snake_case)]
-        impl<$($T, )* R> Fn<($($T,)*)> for DirectFn<extern $conv fn($($T,)*) -> R> {
-            extern "rust-call" fn call(&self, ($($T,)*): ($($T,)*)) -> R {
-                let f: extern $conv fn($($T,)*) -> R = unsafe { mem::transmute(self.fn_addr()) };
-                (f)($($T,)*)
-            }
-        }
-    };
-}
-
-macro_rules! impl_direct_fn_traits {
-    ($($T:ident),*) => {
-        impl_direct_extern_fn_traits!("C", $($T),*);
-        impl_direct_extern_fn_traits!("stdcall", $($T),*);
-        impl_direct_extern_fn_traits!("fastcall", $($T),*);
-    }
-}
-
-impl_direct_fn_traits!();
-impl_direct_fn_traits!(A);
-impl_direct_fn_traits!(A, B);
-impl_direct_fn_traits!(A, B, C);
-impl_direct_fn_traits!(A, B, C, D);
-impl_direct_fn_traits!(A, B, C, D, E);
-impl_direct_fn_traits!(A, B, C, D, E, F);
-impl_direct_fn_traits!(A, B, C, D, E, F, G);
-impl_direct_fn_traits!(A, B, C, D, E, F, G, H);
-impl_direct_fn_traits!(A, B, C, D, E, F, G, H, I);
-impl_direct_fn_traits!(A, B, C, D, E, F, G, H, I, J);
-
-pub struct IndirectFn<F> {
-    pub name: &'static str,
-    pub relative_address: usize,
-    pub hooked: Option<usize>,
-    fn_type: PhantomData<F>,
-}
-
-impl<F> IndirectFn<F> {
-    pub const fn new(name: &'static str, relative_address: usize) -> IndirectFn<F> {
-        IndirectFn {
-            name,
-            relative_address,
-            hooked: None,
-            fn_type: PhantomData,
-        }
-    }
-
-    pub fn address(&self) -> usize {
-        relative_address(self.relative_address)
-    }
-
-    pub unsafe fn hook(&mut self, replacement: F) {
-        let replacement_addr = *(&replacement as *const F as *const usize);
-        self.hooked = Some(self.fn_addr());
-        write(self.address(), replacement_addr);
-    }
-
-    pub unsafe fn unhook(&mut self) {
-        if let Some(original_addr) = self.hooked {
-            write(self.address(), original_addr);
-            self.hooked = None;
-        }
-    }
-
-    pub unsafe fn fn_addr(&self) -> usize {
-        if let Some(original_addr) = self.hooked {
-            original_addr
-        } else {
-            *(self.address() as *const usize)
-        }
-    }
-}
-
-macro_rules! impl_indirect_extern_fn_traits {
-    ($conv:literal, $($T:ident),*) => {
-        #[allow(non_snake_case)]
-        impl<$($T,)* R> FnOnce<($($T,)*)> for IndirectFn<extern $conv fn($($T,)*) -> R> {
-            type Output = R;
-
-            extern "rust-call" fn call_once(self, ($($T,)*): ($($T,)*)) -> R {
-                let f: extern $conv fn($($T,)*) -> R = unsafe { mem::transmute(self.fn_addr()) };
-                (f)($($T,)*)
-            }
-        }
-
-        #[allow(non_snake_case)]
-        impl<$($T, )* R> FnMut<($($T,)*)> for IndirectFn<extern $conv fn($($T,)*) -> R> {
-            extern "rust-call" fn call_mut(&mut self, ($($T,)*): ($($T,)*)) -> R {
-                let f: extern $conv fn($($T,)*) -> R = unsafe { mem::transmute(self.fn_addr()) };
-                (f)($($T,)*)
-            }
-        }
-
-        #[allow(non_snake_case)]
-        impl<$($T, )* R> Fn<($($T,)*)> for IndirectFn<extern $conv fn($($T,)*) -> R> {
-            extern "rust-call" fn call(&self, ($($T,)*): ($($T,)*)) -> R {
-                let f: extern $conv fn($($T,)*) -> R = unsafe { mem::transmute(self.fn_addr()) };
-                (f)($($T,)*)
-            }
-        }
-    };
-}
-
-macro_rules! impl_indirect_fn_traits {
-    ($($T:ident),*) => {
-        impl_indirect_extern_fn_traits!("C", $($T),*);
-        impl_indirect_extern_fn_traits!("stdcall", $($T),*);
-        impl_indirect_extern_fn_traits!("fastcall", $($T),*);
-    }
-}
-
-impl_indirect_fn_traits!();
-impl_indirect_fn_traits!(A);
-impl_indirect_fn_traits!(A, B);
-impl_indirect_fn_traits!(A, B, C);
-impl_indirect_fn_traits!(A, B, C, D);
-impl_indirect_fn_traits!(A, B, C, D, E);
-impl_indirect_fn_traits!(A, B, C, D, E, F);
-impl_indirect_fn_traits!(A, B, C, D, E, F, G);
-impl_indirect_fn_traits!(A, B, C, D, E, F, G, H);
-impl_indirect_fn_traits!(A, B, C, D, E, F, G, H, I);
-impl_indirect_fn_traits!(A, B, C, D, E, F, G, H, I, J);
-
 pub struct BoundFn<F> {
     pub name: &'static str,
+    pub pattern: Option<(&'static str, usize)>,
     pub addr: Mutex<usize>,
     pub hook: Mutex<Option<RawDetour>>,
     fn_type: PhantomData<F>,
 }
 
 impl<F> BoundFn<F> {
-    pub const fn new(name: &'static str) -> BoundFn<F> {
+    pub const fn new(name: &'static str, pattern: Option<(&'static str, usize)>) -> BoundFn<F> {
         BoundFn {
             name,
+            pattern,
             addr: Mutex::new(0),
             hook: Mutex::new(None),
             fn_type: PhantomData,
@@ -308,12 +103,33 @@ impl<F> BoundFn<F> {
         }
     }
 
+    pub fn find(&self, code_addr: usize, code_size: usize) -> Result<(), BindError> {
+        let Some((pattern, offset)) = self.pattern else {
+            return Err(self.not_found());
+        };
+
+        let scanner = Scanner::new(pattern);
+        let result = unsafe { scanner.find(None, code_addr as _, code_size) };
+        if result.is_valid() {
+            if debug::verbose() {
+                debug::info(format!(
+                    "Found address for {}: 0x{:x}",
+                    self.name,
+                    result.get_addr() as usize - offset
+                ));
+            }
+            self.bind(result.get_addr() as usize - offset)
+        } else {
+            Err(self.not_found())
+        }
+    }
+
     pub fn bind_from_imports(
         &self,
         name: &str,
         import_map: &HashMap<String, usize>,
     ) -> Result<(), BindError> {
-        let import = import_map.get(name).ok_or_else(|| BindError::NotFound(name.to_string()))?;
+        let import = import_map.get(name).ok_or_else(|| self.not_found())?;
         self.bind(*import)?;
         Ok(())
     }
@@ -373,17 +189,15 @@ impl<F> BoundFn<F> {
             panic!("{}", &error)
         }
     }
+
+    pub fn not_found(&self) -> BindError {
+        BindError::NotFound(self.name.to_string())
+    }
 }
 
 pub enum BindError {
     AlreadyBound(String),
     NotFound(String),
-}
-
-impl BindError {
-    pub fn debug(&self) -> Option<()> {
-        debug::error(format!("{}", self))
-    }
 }
 
 impl std::fmt::Display for BindError {
@@ -403,12 +217,6 @@ pub enum HookError {
     Unbound(String),
     AlreadyHooked(String),
     Retour(String, retour::Error),
-}
-
-impl HookError {
-    pub fn debug(&self) -> Option<()> {
-        debug::error(format!("{}", self))
-    }
 }
 
 impl std::fmt::Display for HookError {

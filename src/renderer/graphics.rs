@@ -213,18 +213,16 @@ pub extern "C" fn open_bm_image(
     param_2: u32,
     param_3: u32,
 ) -> *mut grim::ImageContainer {
-    unsafe {
-        let image_container = grim::open_bm_image(filename, param_2, param_3);
+    let image_container = grim::open_bm_image(filename, param_2, param_3);
 
-        if let Some(image_container) = ImageContainer::from_raw(image_container) {
-            let removed = image::HqImageContainer::load(&image_container);
-            if let Some(hq_image_container) = removed {
-                unpair_overlay_surfaces(&hq_image_container);
-            }
+    if let Some(image_container) = ImageContainer::from_raw(image_container) {
+        let removed = image::HqImageContainer::load(&image_container);
+        if let Some(hq_image_container) = removed {
+            unpair_overlay_surfaces(&hq_image_container);
         }
-
-        image_container
     }
+
+    image_container
 }
 
 /// Hooks resource management to drop HQ images with original image
@@ -239,7 +237,7 @@ pub extern "C" fn manage_resource(resource: *mut grim::Resource) -> c_int {
         }
     }
 
-    unsafe { grim::manage_resource(resource) }
+    grim::manage_resource(resource)
 }
 
 /// Hooks decompression to track an image through the system
@@ -255,7 +253,7 @@ pub extern "C" fn decompress_image(image: *const grim::Image) {
     // it will shortly be copied to the clean buffer and rendered
     *DECOMPRESSED.lock().unwrap() = Some(ImageAddr::from_ptr(image));
 
-    unsafe { grim::decompress_image(image) }
+    grim::decompress_image(image)
 }
 
 fn active_smush_frame_size() -> Option<(i32, i32)> {
@@ -307,18 +305,16 @@ pub extern "C" fn copy_image(
         }
     }
 
-    unsafe {
-        grim::copy_image(
-            dst_image,
-            dst_surface,
-            src_image,
-            src_surface,
-            x,
-            y,
-            param_7,
-            param_8,
-        )
-    }
+    grim::copy_image(
+        dst_image,
+        dst_surface,
+        src_image,
+        src_surface,
+        x,
+        y,
+        param_7,
+        param_8,
+    )
 }
 
 /// Hooks surface binding to associate surfaces with HQ overlays
@@ -330,7 +326,7 @@ pub extern "C" fn bind_image_surface(
 ) -> *mut grim::Surface {
     let image_addr = ImageAddr::from_ptr(image).original();
     let is_hq = image::HqImage::is_loaded(image_addr);
-    let surface = unsafe { grim::bind_image_surface(image, param_2, param_3, param_4) };
+    let surface = grim::bind_image_surface(image, param_2, param_3, param_4);
     let surface_addr = SurfaceAddr::from_ptr(surface);
 
     if image_addr.is_smush_buffer() {
@@ -375,9 +371,7 @@ pub extern "C" fn setup_draw(draw: *mut grim::Draw, index_buffer: *const c_void)
         };
     }
 
-    unsafe {
-        grim::setup_draw(draw, index_buffer);
-    }
+    grim::setup_draw(draw, index_buffer);
 
     if let Some(hq_draw) = hq_draw {
         // for hq images, use a linear texture filter for better quality
@@ -414,7 +408,7 @@ pub extern "C" fn draw_indexed_primitives(
             .ok();
     }
 
-    unsafe { grim::draw_indexed_primitives(draw, param_2, param_3, param_4, param_5) }
+    grim::draw_indexed_primitives(draw, param_2, param_3, param_4, param_5)
 }
 
 /// Hooks the the opengl draw call for videos to perform a stencil test for cutouts
@@ -430,22 +424,6 @@ pub extern "stdcall" fn draw_elements_base_vertex(
     });
 
     gl::draw_elements_base_vertex.unhook().ok();
-}
-
-/// Hooks the graphics initialization to create a stencil buffer for cutouts
-pub extern "C" fn init_gfx() -> u8 {
-    let result = unsafe { grim::init_gfx() };
-
-    match gl::bind_glew_fns() {
-        Ok(_) => debug::info("Dynamic OpenGL functions found"),
-        Err(unbound) => debug::error(format!("{}", unbound)),
-    };
-
-    if result == 1 {
-        video_cutouts::create_stencil_buffer();
-    }
-
-    result
 }
 
 /// Hooks texture uploads swap out regular assets for their HQ versions
@@ -474,9 +452,9 @@ pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c
     gl::pixel_storei
         .hook(hq_pixel_storei as gl::PixelStorei)
         .ok();
-    unsafe {
-        grim::surface_upload(surface, std::ptr::null_mut());
-    }
+
+    grim::surface_upload(surface, std::ptr::null_mut());
+
     gl::pixel_storei.unhook().ok();
     gl::tex_image_2d.unhook().ok();
     *image::TARGET.lock().unwrap() = None;

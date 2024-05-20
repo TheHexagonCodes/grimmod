@@ -5,14 +5,18 @@ use windows::Win32::System::Diagnostics::Debug::{
     IMAGE_DIRECTORY_ENTRY_IMPORT, IMAGE_NT_HEADERS32,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleA;
+use windows::Win32::System::Memory::{
+    VirtualQuery, MEMORY_BASIC_INFORMATION, MEM_COMMIT, PAGE_EXECUTE_READ,
+};
 use windows::Win32::System::SystemServices::{
     IMAGE_DOS_HEADER, IMAGE_DOS_SIGNATURE, IMAGE_IMPORT_BY_NAME, IMAGE_IMPORT_DESCRIPTOR,
     IMAGE_NT_SIGNATURE,
 };
 use windows::Win32::System::WindowsProgramming::IMAGE_THUNK_DATA32;
 
-use crate::raw::memory::{BASE_ADDRESS, HookError, BindError};
+use crate::raw::memory::{HookError, BASE_ADDRESS};
 use crate::raw::{gl, grim, sdl};
+use crate::renderer::video_cutouts;
 use crate::{debug, feature, misc};
 
 pub fn main() {
@@ -20,58 +24,71 @@ pub fn main() {
 
     debug::info(format!("Base memory address found: 0x{:x}", *BASE_ADDRESS));
 
-    hook_application_entry();
+    if let Err(err) = initiate_startup() {
+        debug::error(format!("GrimMod startup failed: {}", err));
+    }
 }
 
-fn hook_application_entry() {
-    let Some(entry_addr) = (unsafe { get_application_entry_addr() }) else {
-        BindError::NotFound("entry".to_string()).debug();
-        return;
-    };
-    if let Err(err) = grim::entry.bind(entry_addr) {
-        err.debug();
-        return;
-    };
-    if let Err(err) = grim::entry.hook(application_entry) {
-        err.debug();
-        return;
-    };
+fn initiate_startup() -> Result<(), String> {
+    let (code_addr, code_size) = get_executable_memory_region()
+        .ok_or_else(|| "Could not locate executable memory region".to_string())?;
+    grim::find_fns(code_addr, code_size).string_err()?;
+    // hook the application entry point for the next step of the startup
+    let entry_addr = (unsafe { get_application_entry_addr() })
+        .ok_or_else(|| grim::entry.not_found())
+        .string_err()?;
+    grim::entry.bind(entry_addr).string_err()?;
+    grim::entry.hook(application_entry).string_err()
+}
+
+fn features_startup() -> Result<(), String> {
+    let imports = unsafe { get_imports() }
+        .ok_or_else(|| "Could not build the map of static imports".to_string())?;
+    sdl::bind_static_fns(&imports).string_err()?;
+    gl::bind_static_fns(&imports).string_err()?;
+    gl::bind_dynamic_fns().string_err()?;
+    // hook the game gfx init to complete the startup
+    grim::init_gfx.hook(init_gfx).string_err()?;
+    init_features().string_err()
+}
+
+fn complete_startup() -> Result<(), String> {
+    gl::bind_glew_fns().string_err()?;
+    video_cutouts::create_stencil_buffer();
+    misc::validate_mods();
+    Ok(())
 }
 
 /// Wraps the application entry to locate and bind now-loaded functions
 extern "stdcall" fn application_entry() {
-    unsafe {
-        if let Some(imports) = imports() {
-            match sdl::bind_static_fns(&imports) {
-                Ok(_) => debug::info("Static SDL functions found"),
-                Err(err) => err.debug(),
-            };
-
-            match gl::bind_static_fns(&imports) {
-                Ok(_) => debug::info("Static OpenGL functions found"),
-                Err(err) => err.debug(),
-            };
-
-            match gl::bind_dynamic_fns() {
-                Ok(_) => debug::info("Dyanmic OpenGL functions loaded"),
-                Err(err) => err.debug(),
-            };
-        }
-
-        if let Err(err) = init_features() {
-            debug::error(format!("Failed to initialize featureset: {}", err));
-        }
-
-        misc::validate_mods();
-
-        grim::entry();
+    match features_startup() {
+        Ok(_) => debug::info("Successfully attached GrimMod feature hooks"),
+        Err(err) => debug::error(format!("GrimMod feature hooks failed to attach: {}", err)),
     };
+
+    grim::entry();
+}
+
+/// Wraps the graphics initialization function to also bind the glew functions
+/// and create a stencil buffer for cutouts
+pub extern "C" fn init_gfx() -> u8 {
+    let result = grim::init_gfx();
+    if result != 1 {
+        return result;
+    }
+
+    match complete_startup() {
+        Ok(_) => debug::info("All native game functions have been found"),
+        Err(err) => debug::error(format!("GrimMod startup completion failed: {}", err)),
+    };
+
+    1
 }
 
 pub fn init_features() -> Result<(), HookError> {
-    feature::mods();
-    feature::hq_assets();
-    feature::quick_toggle();
+    feature::mods()?;
+    feature::hq_assets()?;
+    feature::quick_toggle()?;
     feature::vsync()?;
     feature::hdpi_fix()?;
 
@@ -96,7 +113,7 @@ unsafe fn get_application_entry_addr() -> Option<usize> {
 }
 
 /// Gets a map of statically imported functions and their address
-unsafe fn imports() -> Option<HashMap<String, usize>> {
+unsafe fn get_imports() -> Option<HashMap<String, usize>> {
     let module_handle = GetModuleHandleA(None).ok()?;
     let dos_header: IMAGE_DOS_HEADER = std::ptr::read(module_handle.0 as *const _);
 
@@ -151,4 +168,29 @@ unsafe fn imports() -> Option<HashMap<String, usize>> {
     }
 
     Some(imports_map)
+}
+
+fn get_executable_memory_region() -> Option<(usize, usize)> {
+    let mut address: usize = *BASE_ADDRESS;
+    let mut mbi: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
+    let mbi_size = std::mem::size_of::<MEMORY_BASIC_INFORMATION>();
+
+    while unsafe { VirtualQuery(Some(address as _), &mut mbi, mbi_size) } != 0 {
+        if mbi.State == MEM_COMMIT && mbi.Protect.contains(PAGE_EXECUTE_READ) {
+            return Some((address, mbi.RegionSize));
+        }
+        address += mbi.RegionSize;
+    }
+
+    None
+}
+
+pub trait StringError<A> {
+    fn string_err(self) -> Result<A, String>;
+}
+
+impl<A, E: ToString> StringError<A> for Result<A, E> {
+    fn string_err(self) -> Result<A, String> {
+        self.map_err(|err| err.to_string())
+    }
 }

@@ -31,7 +31,7 @@ pub extern "C" fn open(raw_filename: *mut c_char, mode: *mut c_char) -> *mut c_v
     };
 
     match find_modded(filename) {
-        None => unsafe { grim::open_file(raw_filename, mode) },
+        None => grim::open_file(raw_filename, mode),
         Some(path) => {
             if debug::verbose() {
                 debug::info(format!("Opening modded {} file", path.display()));
@@ -53,7 +53,7 @@ pub extern "C" fn close(file: *mut c_void) -> i32 {
     let modded = HANDLES.lock().unwrap().contains(&handle);
 
     if !modded {
-        unsafe { grim::close_file(file) }
+        grim::close_file(file)
     } else {
         HANDLES.lock().unwrap().remove(&handle);
         unsafe { fclose(file) }
@@ -66,7 +66,7 @@ pub extern "C" fn read(file: *mut c_void, dst: *mut c_void, size: usize) -> usiz
     let modded = HANDLES.lock().unwrap().contains(&handle);
 
     if !modded {
-        unsafe { grim::read_file(file, dst, size) }
+        grim::read_file(file, dst, size)
     } else {
         unsafe { fread(dst, 1, size, file) }
     }

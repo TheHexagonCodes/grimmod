@@ -143,6 +143,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a26ae43d7bcc3b814de94796a5e736d4029efb0ee900c12e2d54c993ad1a1e07"
 
 [[package]]
+name = "elain"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3522094fae7d65c8313a135fe45fa7e22ec2110c9d387063b66d235281f7f771"
+
+[[package]]
 name = "equivalent"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -314,6 +320,7 @@ dependencies = [
  "glob",
  "image",
  "libvpx-native-sys",
+ "lightningscanner",
  "once_cell",
  "paste",
  "retour",
@@ -414,6 +421,15 @@ checksum = "9d541266c9f3711e6bea9eaef51f5a8cca4b47cbf50f1d19da031c20d0c10463"
 dependencies = [
  "pkg-config",
  "semver-parser",
+]
+
+[[package]]
+name = "lightningscanner"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dfdf74c5927984bb4009a1e299e971cc9bec70a129250255d232dcf16b0f038a"
+dependencies = [
+ "elain",
 ]
 
 [[package]]

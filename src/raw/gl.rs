@@ -6,7 +6,7 @@ use windows::core::PCSTR;
 use windows::Win32::Foundation::PROC;
 
 use crate::bound_fns;
-use crate::raw::memory::{BoundFn, BindError};
+use crate::raw::memory::{BindError, BoundFn};
 use crate::raw::wrappers::{with_system_dll, DllError};
 
 // static imports
@@ -133,8 +133,8 @@ pub fn bind_dynamic_fns() -> Result<(), DllError> {
 
 pub fn bind_glew_fn<F>(unbound_fn: &BoundFn<F>, name: &str) -> Result<(), BindError> {
     let cname = CString::new(name).map_err(|_| BindError::NotFound(name.to_string()))?;
-    let func =
-        get_proc_address(PCSTR(cname.as_ptr() as *const u8)).ok_or_else(|| BindError::NotFound(name.to_string()))?;
+    let func = get_proc_address(PCSTR(cname.as_ptr() as *const u8))
+        .ok_or_else(|| BindError::NotFound(name.to_string()))?;
     unbound_fn.bind(func as usize)?;
     Ok(())
 }

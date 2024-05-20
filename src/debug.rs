@@ -39,9 +39,7 @@ pub fn error<T: AsRef<str>>(message: T) -> Option<()> {
 #[allow(dead_code)]
 pub fn gl<T: AsRef<str>>(message: T) -> Option<()> {
     let cmessage = CString::new(message.as_ref()).ok()?;
-    unsafe {
-        grim::marker(message.as_ref().len(), cmessage.as_ptr());
-    }
+    grim::marker(message.as_ref().len(), cmessage.as_ptr());
     Some(())
 }
 

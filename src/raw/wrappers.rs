@@ -4,8 +4,7 @@ use windows::Win32::Foundation::{HMODULE, MAX_PATH};
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
 use windows::Win32::System::SystemInformation::GetSystemDirectoryA;
 
-use crate::debug;
-use crate::raw::memory::{BoundFn, BindError};
+use crate::raw::memory::{BindError, BoundFn};
 
 pub struct Dll {
     raw: HMODULE,
@@ -33,17 +32,11 @@ pub enum DllError {
     BindError(String, BindError),
 }
 
-impl DllError {
-    pub fn debug(&self) -> Option<()> {
-        debug::error(format!("{}", self))
-    }
-}
-
 impl std::fmt::Display for DllError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             DllError::DllNotOpened(dll) => write!(f, "Could not open '{}'", dll),
-            DllError::BindError(dll, err) => write!(f, "Failed while searching {}: {}", dll, err)
+            DllError::BindError(dll, err) => write!(f, "Failed while searching {}: {}", dll, err),
         }
     }
 }

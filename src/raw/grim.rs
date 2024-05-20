@@ -2,25 +2,27 @@
 
 use std::ffi::{c_char, c_int, c_uint, c_void, CStr};
 
+use crate::bound_fns;
 use crate::raw::gl;
-use crate::raw::memory::Value;
-use crate::{bound_fns, fns};
+use crate::raw::memory::{BindError, Value};
 
 bound_fns! {
     extern "stdcall" fn entry();
-}
 
-fns! {
+    // Initialize the basic graphics components
+    #[pattern("55 8b ec 51 c6 05 ?? ?? ?? ?? 01", 0x0)]
+    extern "C" fn init_gfx() -> u8;
+
     // file operation functions that work with LAB packed files
-    #[address(0x1EF80)]
+    #[pattern("55 8b ec 81 ec 20 02 00 00 a1 ?? ?? ?? ?? 33 c5", 0x0)]
     extern "C" fn open_file(filename: *mut c_char, mode: *mut c_char) -> *mut c_void;
-    #[address(0x1C870)]
+    #[pattern("55 8b ec 8b 45 08 8b c8 69 c9 30 10 00 00 56", 0x0)]
     extern "C" fn close_file(file: *mut c_void) -> c_int;
-    #[address(0x1E050)]
+    #[pattern("7e 08 81 fb 80 00 00 00 7e 1d 8b 0d ?? ?? ?? ?? 8b 51 18 68 c6 07 00 00", 0x19)]
     extern "C" fn read_file(file: *mut c_void, dst: *mut c_void, size: usize) -> usize;
 
     // Reads and parses a bitmap (.bm/.zbm) image into unified image container
-    #[address(0xDADE0)]
+    #[pattern("55 8b ec a1 ?? ?? ?? ?? 8b 48 20 56 6a 41", 0x0)]
     extern "C" fn open_bm_image(
         filename: *const c_char,
         param_2: u32,
@@ -28,7 +30,7 @@ fns! {
     ) -> *mut ImageContainer;
 
     // Copy an image and surface from a source to a pre-allocated destination
-    #[address(0xE5EC0)]
+    #[pattern("8b 04 8d ?? ?? ?? ?? 8b 40 18 85 c0 74 1f", 0x20)]
     extern "C" fn copy_image(
         dst_image: *mut Image,
         dst_surface: *mut Surface,
@@ -41,28 +43,37 @@ fns! {
     );
 
     // Decompresses an image into the global decompression buffer
-    #[address(0x24D20)]
+    #[pattern("55 8b ec 53 8b 5d 08 8b 43 0c 0f af 43 10", 0x0)]
     extern "C" fn decompress_image(image: *const Image);
 
-    #[address(0x2B340)]
+    // Manage a resource based on its state
+    #[pattern("55 8b ec 51 56 8b 75 08 33 c0 81 7e 08 42 4b 4e 44", 0x0)]
     extern "C" fn manage_resource(resource: *mut Resource) -> c_int;
 
     // Gets the surface for an image, creating it if necessary
-    #[address(0x13E010)]
-    extern "C" fn bind_image_surface(image: *mut Image, param_2: u32, param_3: u32, param_4: u32) -> *mut Surface;
+    #[pattern("52 8d 4d f4 51 8d 55 08 52 8d 4d f0 51 8d 55 ec 52", 0x1C)]
+    extern "C" fn bind_image_surface(
+        image: *mut Image,
+        param_2: u32,
+        param_3: u32,
+        param_4: u32
+    ) -> *mut Surface;
 
     // Prepare a surface (aka texture) for uploading to the GPU or upload it now
-    #[address(0xE8A80)]
+
+    #[pattern("55 8b ec 83 ec 18 53 56 8b 75 08 8b 46 0c 57 83 f8 12", 0x0)]
     extern "C" fn surface_upload(surface: *mut Surface, image_data: *mut c_void);
 
-    #[address(0xE8FB0)]
-    extern "C" fn set_draw_shader(draw: *mut Draw, shader: *mut Shader);
-
     // Sets all the OpenGL state for the next draw call
-    #[address(0xF3540)]
+    #[pattern("55 8b ec 51 53 56 8b 75 08 80 be 32 01 00 00 00 57 74 09", 0x0)]
     extern "C" fn setup_draw(draw: *mut Draw, index_buffer: *const c_void);
 
-    #[address(0xF91C0)]
+    // Sets the shader for the next draw call
+    #[pattern("55 8b ec 8b 45 08 8b 4d 0c 3b 48 4c 74 1a", 0x0)]
+    extern "C" fn set_draw_shader(draw: *mut Draw, shader: *mut Shader);
+
+    // Draws the scene with the software renderer
+    #[pattern("55 8b ec 81 ec 40 02 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 fc", 0x0)]
     extern "C" fn draw_software_scene(
         draw: *const Draw,
         software_surface: *const Surface,
@@ -70,7 +81,7 @@ fns! {
     );
 
     // Draw the selected indexed primitives
-    #[address(0xF3890)]
+    #[pattern("55 8b ec 56 8b 75 18 57 8b 7d 10 83 fe fe 75 05", 0x0)]
     extern "C" fn draw_indexed_primitives(
         draw: *mut Draw,
         param_2: u32,
@@ -79,12 +90,29 @@ fns! {
         param_5: u32
     );
 
-    // Initialize the basic graphics components
-    #[address(0xF2960)]
-    extern "C" fn init_gfx() -> u8;
-
-    #[address(0xEA1B0)]
+    // Leaves a marker for debugging OpenGL calls
+    #[pattern("55 8b ec 57 8b 3d ?? ?? ?? ?? 85 ff 74 17", 0x0)]
     extern "C" fn marker(len: usize, message: *const c_char);
+}
+
+pub fn find_fns(code_addr: usize, code_size: usize) -> Result<(), BindError> {
+    init_gfx.find(code_addr, code_size)?;
+    open_file.find(code_addr, code_size)?;
+    close_file.find(code_addr, code_size)?;
+    read_file.find(code_addr, code_size)?;
+    open_bm_image.find(code_addr, code_size)?;
+    copy_image.find(code_addr, code_size)?;
+    decompress_image.find(code_addr, code_size)?;
+    manage_resource.find(code_addr, code_size)?;
+    bind_image_surface.find(code_addr, code_size)?;
+    surface_upload.find(code_addr, code_size)?;
+    setup_draw.find(code_addr, code_size)?;
+    set_draw_shader.find(code_addr, code_size)?;
+    draw_software_scene.find(code_addr, code_size)?;
+    draw_indexed_primitives.find(code_addr, code_size)?;
+    marker.find(code_addr, code_size)?;
+
+    Ok(())
 }
 
 // buffers used for backgrounds and overlays
