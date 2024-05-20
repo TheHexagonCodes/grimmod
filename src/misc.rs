@@ -10,7 +10,7 @@ use windows::Win32::Graphics::Gdi::{MONITORINFO, MONITOR_DEFAULTTONEAREST};
 use windows::Win32::UI::WindowsAndMessaging::SetProcessDPIAware;
 
 use crate::debug;
-use crate::raw::{gl, grim};
+use crate::raw::{grim, sdl};
 
 const VERSION: Version = Version::new(1, 0, 0);
 
@@ -55,8 +55,8 @@ pub fn validate_mods() {
 }
 
 /// Get the game's screen's size and position
-pub fn screen_bounds() -> Option<gl::Rect> {
-    let mut window_info: gl::SysWminfo = Default::default();
+pub fn screen_bounds() -> Option<sdl::Rect> {
+    let mut window_info: sdl::SysWminfo = Default::default();
     let mut monitor_info = MONITORINFO {
         cbSize: std::mem::size_of::<MONITORINFO>() as u32,
         ..Default::default()
@@ -64,7 +64,7 @@ pub fn screen_bounds() -> Option<gl::Rect> {
 
     unsafe {
         let window = grim::GAME_WINDOW.get();
-        if gl::sdl_get_window_wminfo(window as *mut _, &mut window_info) == BOOL(0) {
+        if sdl::get_window_wminfo(window as *mut _, &mut window_info) == BOOL(0) {
             return None;
         }
         let hmonitor = MonitorFromWindow(window_info.window, MONITOR_DEFAULTTONEAREST);
@@ -76,7 +76,7 @@ pub fn screen_bounds() -> Option<gl::Rect> {
     let width = monitor_info.rcMonitor.right - x;
     let height = monitor_info.rcMonitor.bottom - y;
 
-    Some(gl::Rect {
+    Some(sdl::Rect {
         x: 0,
         y: 0,
         w: width,
@@ -88,7 +88,7 @@ pub fn screen_bounds() -> Option<gl::Rect> {
 ///
 /// This is a overload for a native function that will be hooked
 pub extern "C" fn sdl_gl_set_swap_interval(_interval: c_int) -> c_int {
-    unsafe { gl::sdl_set_swap_interval(1) }
+    sdl::set_swap_interval(1)
 }
 
 pub extern "C" fn sdl_create_window(
@@ -101,11 +101,11 @@ pub extern "C" fn sdl_create_window(
 ) -> *mut c_void {
     unsafe {
         SetProcessDPIAware();
-        gl::sdl_create_window(title, x, y, w, h, flags | gl::SDL_WINDOW_ALLOW_HIGHDPI)
+        sdl::create_window(title, x, y, w, h, flags | sdl::WINDOW_ALLOW_HIGHDPI)
     }
 }
 
-pub extern "C" fn sdl_get_display_bounds(_display_index: c_int, rect: *mut gl::Rect) -> c_int {
+pub extern "C" fn sdl_get_display_bounds(_display_index: c_int, rect: *mut sdl::Rect) -> c_int {
     let Some(screen_bounds) = screen_bounds() else {
         return -1;
     };
@@ -117,10 +117,10 @@ pub extern "C" fn sdl_get_display_bounds(_display_index: c_int, rect: *mut gl::R
 
 pub extern "C" fn sdl_get_current_display_mode(
     display_index: c_int,
-    mode: *mut gl::DisplayMode,
+    mode: *mut sdl::DisplayMode,
 ) -> c_int {
     unsafe {
-        let result = gl::sdl_get_current_display_mode(display_index, mode);
+        let result = sdl::get_current_display_mode(display_index, mode);
         if result == 0 {
             let Some(screen_bounds) = screen_bounds() else {
                 return -1;

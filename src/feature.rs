@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::raw::{gl, grim};
+use crate::raw::{gl, grim, sdl};
 use crate::renderer::graphics;
 use crate::{file, misc};
 
@@ -60,9 +60,7 @@ pub fn vsync() {
         return;
     }
 
-    unsafe {
-        gl::sdl_set_swap_interval.hook(misc::sdl_gl_set_swap_interval as gl::SdlSetSwapInterval);
-    }
+    sdl::set_swap_interval.hook(misc::sdl_gl_set_swap_interval as sdl::SetSwapInterval).ok();
 }
 
 /// Render game at native resolution even on HDPI screens
@@ -71,10 +69,8 @@ pub fn hdpi_fix() {
         return;
     }
 
-    unsafe {
-        gl::sdl_create_window.hook(misc::sdl_create_window as gl::SdlCreateWindow);
-        gl::sdl_get_display_bounds.hook(misc::sdl_get_display_bounds as gl::SdlGetDisplayBounds);
-        gl::sdl_get_current_display_mode
-            .hook(misc::sdl_get_current_display_mode as gl::SdlGetCurrentDisplayMode);
-    }
+    sdl::create_window.hook(misc::sdl_create_window as sdl::CreateWindow).ok();
+    sdl::get_display_bounds.hook(misc::sdl_get_display_bounds as sdl::GetDisplayBounds).ok();
+    sdl::get_current_display_mode
+        .hook(misc::sdl_get_current_display_mode as sdl::GetCurrentDisplayMode).ok();
 }

@@ -1,5 +1,6 @@
 use once_cell::sync::Lazy;
 use retour::RawDetour;
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::mem;
 use std::sync::Mutex;
@@ -44,6 +45,7 @@ pub unsafe fn read<T: Sized + Clone + Default>(address: usize) -> T {
     value_ref.cloned().unwrap_or_default()
 }
 
+#[allow(dead_code)]
 pub unsafe fn with_mut_ref<T, F: FnOnce(&mut T)>(address: usize, block: F) {
     let mut existing_flags: PAGE_PROTECTION_FLAGS = std::mem::zeroed();
 
@@ -65,6 +67,7 @@ pub unsafe fn with_mut_ref<T, F: FnOnce(&mut T)>(address: usize, block: F) {
     );
 }
 
+#[allow(dead_code)]
 pub unsafe fn write<T: Sized>(address: usize, value: T) {
     with_mut_ref(address, |reference| {
         *reference = value;
@@ -212,12 +215,12 @@ impl<F> IndirectFn<F> {
         write(self.address(), replacement_addr);
     }
 
-    // pub unsafe fn unhook(&mut self) {
-    //     if let Some(original_addr) = self.hooked {
-    //         write(self.address(), original_addr);
-    //         self.hooked = None;
-    //     }
-    // }
+    pub unsafe fn unhook(&mut self) {
+        if let Some(original_addr) = self.hooked {
+            write(self.address(), original_addr);
+            self.hooked = None;
+        }
+    }
 
     pub unsafe fn fn_addr(&self) -> usize {
         if let Some(original_addr) = self.hooked {
@@ -297,6 +300,16 @@ impl<F> BoundFn<F> {
 
     pub fn bind(&self, addr: usize) {
         *self.addr.lock().unwrap() = addr;
+    }
+
+    pub fn bind_from_imports(
+        &self,
+        name: &str,
+        import_map: &HashMap<String, usize>,
+    ) -> Result<(), String> {
+        let import = import_map.get(name).ok_or_else(|| name.to_string())?;
+        self.bind(*import);
+        Ok(())
     }
 
     pub fn hook(&self, replacement: F) -> Result<(), HookError> {
