@@ -11,7 +11,7 @@ use windows::Win32::System::SystemServices::{
 };
 use windows::Win32::System::WindowsProgramming::IMAGE_THUNK_DATA32;
 
-use crate::raw::memory::BASE_ADDRESS;
+use crate::raw::memory::{BASE_ADDRESS, HookError, BindError};
 use crate::raw::{gl, grim, sdl};
 use crate::{debug, feature, misc};
 
@@ -20,12 +20,22 @@ pub fn main() {
 
     debug::info(format!("Base memory address found: 0x{:x}", *BASE_ADDRESS));
 
-    unsafe {
-        if let Some(entry_addr) = get_application_entry_addr() {
-            grim::entry.bind(entry_addr);
-            grim::entry.hook(application_entry).ok();
-        }
-    }
+    hook_application_entry();
+}
+
+fn hook_application_entry() {
+    let Some(entry_addr) = (unsafe { get_application_entry_addr() }) else {
+        BindError::NotFound("entry".to_string()).debug();
+        return;
+    };
+    if let Err(err) = grim::entry.bind(entry_addr) {
+        err.debug();
+        return;
+    };
+    if let Err(err) = grim::entry.hook(application_entry) {
+        err.debug();
+        return;
+    };
 }
 
 /// Wraps the application entry to locate and bind now-loaded functions
@@ -34,34 +44,38 @@ extern "stdcall" fn application_entry() {
         if let Some(imports) = imports() {
             match sdl::bind_static_fns(&imports) {
                 Ok(_) => debug::info("Static SDL functions found"),
-                Err(unbound) => {
-                    debug::error(format!("Could not find SDL function '{}'", unbound))
-                }
+                Err(err) => err.debug(),
             };
 
             match gl::bind_static_fns(&imports) {
                 Ok(_) => debug::info("Static OpenGL functions found"),
-                Err(unbound) => {
-                    debug::error(format!("Could not find OpenGL function '{}'", unbound))
-                }
+                Err(err) => err.debug(),
             };
 
             match gl::bind_dynamic_fns() {
                 Ok(_) => debug::info("Dyanmic OpenGL functions loaded"),
-                Err(err) => debug::error(format!("{}", err)),
+                Err(err) => err.debug(),
             };
         }
 
-        feature::mods();
-        feature::hq_assets();
-        feature::quick_toggle();
-        feature::vsync();
-        feature::hdpi_fix();
+        if let Err(err) = init_features() {
+            debug::error(format!("Failed to initialize featureset: {}", err));
+        }
 
         misc::validate_mods();
 
         grim::entry();
     };
+}
+
+pub fn init_features() -> Result<(), HookError> {
+    feature::mods();
+    feature::hq_assets();
+    feature::quick_toggle();
+    feature::vsync()?;
+    feature::hdpi_fix()?;
+
+    Ok(())
 }
 
 /// Gets the address of the main application entry function

@@ -298,17 +298,23 @@ impl<F> BoundFn<F> {
         }
     }
 
-    pub fn bind(&self, addr: usize) {
-        *self.addr.lock().unwrap() = addr;
+    pub fn bind(&self, addr: usize) -> Result<(), BindError> {
+        let mut addr_guard = self.addr.lock().unwrap();
+        if *addr_guard == 0 {
+            *addr_guard = addr;
+            Ok(())
+        } else {
+            Err(BindError::AlreadyBound(self.name.to_string()))
+        }
     }
 
     pub fn bind_from_imports(
         &self,
         name: &str,
         import_map: &HashMap<String, usize>,
-    ) -> Result<(), String> {
-        let import = import_map.get(name).ok_or_else(|| name.to_string())?;
-        self.bind(*import);
+    ) -> Result<(), BindError> {
+        let import = import_map.get(name).ok_or_else(|| BindError::NotFound(name.to_string()))?;
+        self.bind(*import)?;
         Ok(())
     }
 
@@ -369,10 +375,58 @@ impl<F> BoundFn<F> {
     }
 }
 
+pub enum BindError {
+    AlreadyBound(String),
+    NotFound(String),
+}
+
+impl BindError {
+    pub fn debug(&self) -> Option<()> {
+        debug::error(format!("{}", self))
+    }
+}
+
+impl std::fmt::Display for BindError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BindError::AlreadyBound(func) => {
+                write!(f, "Tried to find '{}' but it has already been found", func)
+            }
+            BindError::NotFound(func) => {
+                write!(f, "Could not find '{}'", func)
+            }
+        }
+    }
+}
+
 pub enum HookError {
     Unbound(String),
     AlreadyHooked(String),
     Retour(String, retour::Error),
+}
+
+impl HookError {
+    pub fn debug(&self) -> Option<()> {
+        debug::error(format!("{}", self))
+    }
+}
+
+impl std::fmt::Display for HookError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HookError::Unbound(func) => write!(f, "Tried to hook '{}' before it was found", func),
+            HookError::AlreadyHooked(func) => {
+                write!(f, "Tried to hook '{}' while already hooked", func)
+            }
+            HookError::Retour(func, retour_err) => {
+                write!(
+                    f,
+                    "Low-level error while hooking '{}': {:?}",
+                    func, retour_err
+                )
+            }
+        }
+    }
 }
 
 pub enum UnhookError {

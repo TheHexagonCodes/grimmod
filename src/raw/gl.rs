@@ -5,10 +5,9 @@ use std::ffi::{c_int, c_uint, c_void, CString};
 use windows::core::PCSTR;
 use windows::Win32::Foundation::PROC;
 
-use crate::raw::memory::BoundFn;
 use crate::bound_fns;
-
-use super::wrappers;
+use crate::raw::memory::{BoundFn, BindError};
+use crate::raw::wrappers::{with_system_dll, DllError};
 
 // static imports
 bound_fns! {
@@ -105,7 +104,7 @@ pub const RENDERBUFFER: Enum = 0x8D41;
 pub const DEPTH24_STENCIL8: Enum = 0x88F0;
 pub const VERTEX_ARRAY_BINDING: Enum = 0x85B5;
 
-pub fn bind_static_fns(import_map: &HashMap<String, usize>) -> Result<(), String> {
+pub fn bind_static_fns(import_map: &HashMap<String, usize>) -> Result<(), BindError> {
     get_proc_address.bind_from_imports("wglGetProcAddress", import_map)?;
     get_error.bind_from_imports("glGetError", import_map)?;
     tex_image_2d.bind_from_imports("glTexImage2D", import_map)?;
@@ -121,8 +120,8 @@ pub fn bind_static_fns(import_map: &HashMap<String, usize>) -> Result<(), String
     Ok(())
 }
 
-pub fn bind_dynamic_fns() -> Result<(), wrappers::DllError> {
-    wrappers::with_system_dll("opengl32.dll", |dll| {
+pub fn bind_dynamic_fns() -> Result<(), DllError> {
+    with_system_dll("opengl32.dll", |dll| {
         dll.bind(&draw_arrays, "glDrawArrays")?;
         dll.bind(&stencil_func, "glStencilFunc")?;
         dll.bind(&stencil_op, "glStencilOp")?;
@@ -132,15 +131,15 @@ pub fn bind_dynamic_fns() -> Result<(), wrappers::DllError> {
     })
 }
 
-pub fn bind_glew_fn<F>(bound_fn: &BoundFn<F>, name: &str) -> Result<(), String> {
-    let cname = CString::new(name).map_err(|_| name.to_string())?;
+pub fn bind_glew_fn<F>(unbound_fn: &BoundFn<F>, name: &str) -> Result<(), BindError> {
+    let cname = CString::new(name).map_err(|_| BindError::NotFound(name.to_string()))?;
     let func =
-        get_proc_address(PCSTR(cname.as_ptr() as *const u8)).ok_or_else(|| name.to_string())?;
-    bound_fn.bind(func as usize);
+        get_proc_address(PCSTR(cname.as_ptr() as *const u8)).ok_or_else(|| BindError::NotFound(name.to_string()))?;
+    unbound_fn.bind(func as usize)?;
     Ok(())
 }
 
-pub fn bind_glew_fns() -> Result<(), String> {
+pub fn bind_glew_fns() -> Result<(), BindError> {
     bind_glew_fn(&sampler_parameteri, "glSamplerParameteri")?;
     bind_glew_fn(&blend_func_separate, "glBlendFuncSeparate")?;
     bind_glew_fn(&gen_buffers, "glGenBuffers")?;

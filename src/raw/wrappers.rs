@@ -4,7 +4,8 @@ use windows::Win32::Foundation::{HMODULE, MAX_PATH};
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
 use windows::Win32::System::SystemInformation::GetSystemDirectoryA;
 
-use super::memory::BoundFn;
+use crate::debug;
+use crate::raw::memory::{BoundFn, BindError};
 
 pub struct Dll {
     raw: HMODULE,
@@ -18,27 +19,31 @@ impl Dll {
         proc.map(|f| f as usize)
     }
 
-    pub fn bind<F>(&self, unbound_fn: &BoundFn<F>, proc_name: &str) -> Result<(), String> {
+    pub fn bind<F>(&self, unbound_fn: &BoundFn<F>, proc_name: &str) -> Result<(), BindError> {
         let proc_addr = self
             .get_proc_addr(proc_name)
-            .ok_or_else(|| proc_name.to_string())?;
-        unbound_fn.bind(proc_addr);
+            .ok_or_else(|| BindError::NotFound(proc_name.to_string()))?;
+        unbound_fn.bind(proc_addr)?;
         Ok(())
     }
 }
 
 pub enum DllError {
     DllNotOpened(String),
-    ProcNotFound(String, String),
+    BindError(String, BindError),
+}
+
+impl DllError {
+    pub fn debug(&self) -> Option<()> {
+        debug::error(format!("{}", self))
+    }
 }
 
 impl std::fmt::Display for DllError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             DllError::DllNotOpened(dll) => write!(f, "Could not open '{}'", dll),
-            DllError::ProcNotFound(dll, proc) => {
-                write!(f, "Could not find '{}' function in '{}'", proc, dll)
-            }
+            DllError::BindError(dll, err) => write!(f, "Failed while searching {}: {}", dll, err)
         }
     }
 }
@@ -50,7 +55,7 @@ impl std::fmt::Display for DllError {
 /// the function pointers can be considered as always valid.
 pub fn with_system_dll<F>(name: &str, f: F) -> Result<(), DllError>
 where
-    F: Fn(Dll) -> Result<(), String>,
+    F: Fn(Dll) -> Result<(), BindError>,
 {
     let err = || DllError::DllNotOpened(name.to_string());
     if !name.chars().all(|c| c.is_alphanumeric() || c == '.') {
@@ -62,7 +67,7 @@ where
     let dll = Dll {
         raw: raw_dll.ok_or_else(err)?,
     };
-    f(dll).map_err(|err| DllError::ProcNotFound(name.to_string(), err))
+    f(dll).map_err(|err| DllError::BindError(name.to_string(), err))
 }
 
 /// Find the system path for a DLL, e.g. C:\Windows\SysWOW64\opengl32.dll

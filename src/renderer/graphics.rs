@@ -438,7 +438,7 @@ pub extern "C" fn init_gfx() -> u8 {
 
     match gl::bind_glew_fns() {
         Ok(_) => debug::info("Dynamic OpenGL functions found"),
-        Err(unbound) => debug::error(format!("Could not find OpenGL function '{}'", unbound)),
+        Err(unbound) => debug::error(format!("{}", unbound)),
     };
 
     if result == 1 {
