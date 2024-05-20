@@ -1,18 +1,20 @@
 #![allow(non_upper_case_globals)]
 
-use std::ffi::{c_char, c_int, c_uint, c_void};
-use windows::Win32::Foundation::{BOOL, HMODULE, HWND};
+use std::collections::HashMap;
+use std::ffi::{c_char, c_int, c_uint, c_void, CString};
+use windows::core::PCSTR;
+use windows::Win32::Foundation::{BOOL, HMODULE, HWND, PROC};
 use windows::Win32::Graphics::Gdi::HDC;
 
-use crate::fn_refs;
-pub use crate::raw::proxy::{
-    glClear as clear, glColorMask as color_mask, glDepthMask as depth_mask,
-    glDrawArrays as draw_arrays, glGetError as get_error, glStencilFunc as stencil_func,
-    glStencilMask as stencil_mask, glStencilOp as stencil_op,
-};
+use crate::raw::memory::BoundFn;
+use crate::{bound_fns, fn_refs};
 
-fn_refs! {
-    #[address(0x1713E0)]
+use super::wrappers;
+
+// static imports
+bound_fns! {
+    extern "stdcall" fn get_proc_address(name: PCSTR) -> PROC;
+    extern "stdcall" fn get_error() -> Enum;
     extern "stdcall" fn tex_image_2d(
         target: Enum,
         level: Int,
@@ -24,54 +26,55 @@ fn_refs! {
         typ: Enum,
         data: *const c_void,
     );
-    #[address(0x1713EC)]
     extern "stdcall" fn pixel_storei(pname: Enum, param: Int);
-    #[address(0x171414)]
     extern "stdcall" fn get_integerv(pname: Enum, params: *mut Int);
-    #[address(0x171420)]
     extern "stdcall" fn delete_textures(n: Sizei, textures: *const Uint);
-    #[address(0x2E84064)]
+    extern "stdcall" fn enable(cap: Enum);
+    extern "stdcall" fn disable(cap: Enum);
+    extern "stdcall" fn color_mask(red: Uint, green: Uint, blue: Uint, alpha: Uint);
+    extern "stdcall" fn depth_mask(flag: Uint);
+    extern "stdcall" fn clear(mask: u32);
+}
+
+// dynamic imports
+bound_fns! {
+    extern "stdcall" fn draw_arrays(mode: Enum, first: Int, count: Sizei);
+    extern "stdcall" fn stencil_func(func: Enum, ref_value: Int, mask: Uint);
+    extern "stdcall" fn stencil_op(sfail: Enum, dpfail: Enum, dppass: Enum);
+    extern "stdcall" fn stencil_mask(mask: Uint);
+}
+
+// glew imports
+bound_fns! {
     extern "stdcall" fn sampler_parameteri(sampler: Uint, pname: Enum, param: Int);
-    #[address(0x2E8360C)]
     extern "stdcall" fn blend_func_separate(
         src_rgb: Enum,
         dst_rgb: Enum,
         src_alpha: Enum,
         dst_alpha: Enum
     );
-    #[address(0x2E836C4)]
     extern "stdcall" fn bind_buffer(target: Enum, buffer: Uint);
-    #[address(0x2E836C8)]
     extern "stdcall" fn buffer_data(target: Enum, size: Sizei, data: *mut c_void, usage: Enum);
-    #[address(0x2E836DC)]
     extern "stdcall" fn gen_buffers(n: Sizei, buffers: *mut Uint);
-    #[address(0x2E8387C)]
-    extern "stdcall" fn vertex_attrib_pointer(index: Uint, size: Int, typ: Enum, normalized: Uint, stride: Sizei, pointer: *const c_void);
-    #[address(0x2E83738)]
+    extern "stdcall" fn vertex_attrib_pointer(
+        index: Uint,
+        size: Int,
+        typ: Enum,
+        normalized: Uint,
+        stride: Sizei,
+        pointer: *const c_void
+    );
     extern "stdcall" fn enable_vertex_attrib_array(index: Uint);
-    #[address(0x2E83D3C)]
     extern "stdcall" fn draw_elements_base_vertex(mode: Enum, count: Sizei, typ: Enum, indicies: *mut c_void, basevertex: Int);
-
-    #[address(0x1713FC)]
-    extern "stdcall" fn enable(cap: Enum);
-    #[address(0x171400)]
-    extern "stdcall" fn disable(cap: Enum);
-
-    #[address(0x2E84358)]
     extern "stdcall" fn gen_vertex_arrays(n: Sizei, arrays: *mut Uint);
-    #[address(0x2E84350)]
     extern "stdcall" fn bind_vertex_array(array: Uint);
-
-    #[address(0x2E83D94)]
     extern "stdcall" fn gen_renderbuffers(n: Sizei, renderbuffers: *mut Uint);
-    #[address(0x2E83D68)]
     extern "stdcall" fn bind_renderbuffer(target: Enum, renderbuffer: Uint);
-    #[address(0x2E83DAC)]
     extern "stdcall" fn renderbuffer_storage(target: Enum, internalformat: Enum, width: Sizei, height: Sizei);
-
-    #[address(0x2E83D7C)]
     extern "stdcall" fn framebuffer_renderbuffer(target: Enum, attachment: Enum, renderbuffertarget: Enum, renderbuffer: Uint);
+}
 
+fn_refs! {
     #[address(0x17147C)]
     extern "C" fn sdl_set_swap_interval(interval: c_int) -> c_int;
     #[address(0x1714F0)]
@@ -154,3 +157,67 @@ pub const FRAMEBUFFER: Enum = 0x8D40;
 pub const RENDERBUFFER: Enum = 0x8D41;
 pub const DEPTH24_STENCIL8: Enum = 0x88F0;
 pub const VERTEX_ARRAY_BINDING: Enum = 0x85B5;
+
+pub fn bind_static_fn<F>(
+    bound_fn: &BoundFn<F>,
+    name: &str,
+    import_map: &HashMap<String, usize>,
+) -> Result<(), String> {
+    let import = import_map.get(name).ok_or_else(|| name.to_string())?;
+    bound_fn.bind(*import);
+    Ok(())
+}
+
+pub fn bind_static_fns(import_map: &HashMap<String, usize>) -> Result<(), String> {
+    bind_static_fn(&get_proc_address, "wglGetProcAddress", import_map)?;
+    bind_static_fn(&get_error, "glGetError", import_map)?;
+    bind_static_fn(&tex_image_2d, "glTexImage2D", import_map)?;
+    bind_static_fn(&pixel_storei, "glPixelStorei", import_map)?;
+    bind_static_fn(&get_integerv, "glGetIntegerv", import_map)?;
+    bind_static_fn(&delete_textures, "glDeleteTextures", import_map)?;
+    bind_static_fn(&enable, "glEnable", import_map)?;
+    bind_static_fn(&disable, "glDisable", import_map)?;
+    bind_static_fn(&color_mask, "glColorMask", import_map)?;
+    bind_static_fn(&depth_mask, "glDepthMask", import_map)?;
+    bind_static_fn(&clear, "glClear", import_map)?;
+
+    Ok(())
+}
+
+pub fn bind_dynamic_fns() -> Result<(), wrappers::DllError> {
+    wrappers::with_system_dll("opengl32.dll", |dll| {
+        dll.bind(&draw_arrays, "glDrawArrays")?;
+        dll.bind(&stencil_func, "glStencilFunc")?;
+        dll.bind(&stencil_op, "glStencilOp")?;
+        dll.bind(&stencil_mask, "glStencilMask")?;
+
+        Ok(())
+    })
+}
+
+pub fn bind_glew_fn<F>(bound_fn: &BoundFn<F>, name: &str) -> Result<(), String> {
+    let cname = CString::new(name).map_err(|_| name.to_string())?;
+    let func =
+        get_proc_address(PCSTR(cname.as_ptr() as *const u8)).ok_or_else(|| name.to_string())?;
+    bound_fn.bind(func as usize);
+    Ok(())
+}
+
+pub fn bind_glew_fns() -> Result<(), String> {
+    bind_glew_fn(&sampler_parameteri, "glSamplerParameteri")?;
+    bind_glew_fn(&blend_func_separate, "glBlendFuncSeparate")?;
+    bind_glew_fn(&gen_buffers, "glGenBuffers")?;
+    bind_glew_fn(&bind_buffer, "glBindBuffer")?;
+    bind_glew_fn(&buffer_data, "glBufferData")?;
+    bind_glew_fn(&vertex_attrib_pointer, "glVertexAttribPointer")?;
+    bind_glew_fn(&enable_vertex_attrib_array, "glEnableVertexAttribArray")?;
+    bind_glew_fn(&draw_elements_base_vertex, "glDrawElementsBaseVertex")?;
+    bind_glew_fn(&gen_vertex_arrays, "glGenVertexArrays")?;
+    bind_glew_fn(&bind_vertex_array, "glBindVertexArray")?;
+    bind_glew_fn(&gen_renderbuffers, "glGenRenderbuffers")?;
+    bind_glew_fn(&bind_renderbuffer, "glBindRenderbuffer")?;
+    bind_glew_fn(&renderbuffer_storage, "glRenderbufferStorage")?;
+    bind_glew_fn(&framebuffer_renderbuffer, "glFramebufferRenderbuffer")?;
+
+    Ok(())
+}

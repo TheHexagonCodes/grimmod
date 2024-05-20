@@ -358,7 +358,7 @@ pub extern "stdcall" fn delete_textures(n: gl::Sizei, textures: *const gl::Uint)
     let surface_addr = SurfaceAddr(textures as usize - 0x20);
     OVERLAYS.lock().unwrap().remove(&surface_addr);
 
-    unsafe { gl::delete_textures(n, textures) };
+    gl::delete_textures(n, textures);
 }
 
 /// Hooks draw preparation to set state for HQ images
@@ -380,22 +380,20 @@ pub extern "C" fn setup_draw(draw: *mut grim::Draw, index_buffer: *const c_void)
     }
 
     if let Some(hq_draw) = hq_draw {
-        unsafe {
-            // for hq images, use a linear texture filter for better quality
-            gl::sampler_parameteri(
-                hq_draw.sampler,
-                gl::TEXTURE_MIN_FILTER,
-                gl::LINEAR as gl::Int,
-            );
-            gl::sampler_parameteri(
-                hq_draw.sampler,
-                gl::TEXTURE_MAG_FILTER,
-                gl::LINEAR as gl::Int,
-            );
+        // for hq images, use a linear texture filter for better quality
+        gl::sampler_parameteri(
+            hq_draw.sampler,
+            gl::TEXTURE_MIN_FILTER,
+            gl::LINEAR as gl::Int,
+        );
+        gl::sampler_parameteri(
+            hq_draw.sampler,
+            gl::TEXTURE_MAG_FILTER,
+            gl::LINEAR as gl::Int,
+        );
 
-            if !hq_draw.surface.is_bitmap_underlays() {
-                gl::blend_func_separate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA, 1, 0);
-            }
+        if !hq_draw.surface.is_bitmap_underlays() {
+            gl::blend_func_separate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA, 1, 0);
         }
     }
 }
@@ -411,10 +409,9 @@ pub extern "C" fn draw_indexed_primitives(
     if image::Background::is_stencilled_video_scene()
         && Draw::from_raw(draw).map_or(false, |draw| draw.is_smush())
     {
-        unsafe {
-            gl::draw_elements_base_vertex
-                .hook(draw_elements_base_vertex as gl::DrawElementsBaseVertex);
-        }
+        gl::draw_elements_base_vertex
+            .hook(draw_elements_base_vertex as gl::DrawElementsBaseVertex)
+            .ok();
     }
 
     unsafe { grim::draw_indexed_primitives(draw, param_2, param_3, param_4, param_5) }
@@ -428,21 +425,26 @@ pub extern "stdcall" fn draw_elements_base_vertex(
     indicies: *mut c_void,
     basevertex: gl::Int,
 ) {
-    unsafe {
-        video_cutouts::with_stencil(|| {
-            gl::draw_elements_base_vertex(mode, count, typ, indicies, basevertex);
-        });
+    video_cutouts::with_stencil(|| {
+        gl::draw_elements_base_vertex(mode, count, typ, indicies, basevertex);
+    });
 
-        gl::draw_elements_base_vertex.unhook();
-    }
+    gl::draw_elements_base_vertex.unhook().ok();
 }
 
 /// Hooks the graphics initialization to create a stencil buffer for cutouts
 pub extern "C" fn init_gfx() -> u8 {
     let result = unsafe { grim::init_gfx() };
+
+    match gl::bind_glew_fns() {
+        Ok(_) => debug::info("Dynamic OpenGL functions found"),
+        Err(unbound) => debug::error(format!("Could not find OpenGL function '{}'", unbound)),
+    };
+
     if result == 1 {
         video_cutouts::create_stencil_buffer();
     }
+
     result
 }
 
@@ -466,13 +468,17 @@ pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c
     }
 
     *image::TARGET.lock().unwrap() = target;
+    gl::tex_image_2d
+        .hook(hq_tex_image_2d as gl::TexImage2d)
+        .ok();
+    gl::pixel_storei
+        .hook(hq_pixel_storei as gl::PixelStorei)
+        .ok();
     unsafe {
-        gl::tex_image_2d.hook(hq_tex_image_2d as gl::TexImage2d);
-        gl::pixel_storei.hook(hq_pixel_storei as gl::PixelStorei);
         grim::surface_upload(surface, std::ptr::null_mut());
-        gl::pixel_storei.unhook();
-        gl::tex_image_2d.unhook();
     }
+    gl::pixel_storei.unhook().ok();
+    gl::tex_image_2d.unhook().ok();
     *image::TARGET.lock().unwrap() = None;
 }
 
@@ -488,19 +494,17 @@ extern "stdcall" fn hq_tex_image_2d(
     _data: *const c_void,
 ) {
     fn tex_image_2d(width: u32, height: u32, ptr: *const u8) {
-        unsafe {
-            gl::tex_image_2d(
-                gl::TEXTURE_2D,
-                0,
-                gl::RGBA8 as gl::Int,
-                width as gl::Int,
-                height as gl::Int,
-                0,
-                gl::RGBA,
-                gl::UNSIGNED_BYTE,
-                ptr as *const _,
-            )
-        }
+        gl::tex_image_2d(
+            gl::TEXTURE_2D,
+            0,
+            gl::RGBA8 as gl::Int,
+            width as gl::Int,
+            height as gl::Int,
+            0,
+            gl::RGBA,
+            gl::UNSIGNED_BYTE,
+            ptr as *const _,
+        )
     }
     image::with_target_hq_image(|target_ref| match target_ref {
         image::TargetMut::Background(background) => tex_image_2d(
@@ -519,7 +523,7 @@ extern "stdcall" fn hq_tex_image_2d(
 }
 
 extern "stdcall" fn hq_pixel_storei(pname: gl::Enum, param: gl::Int) {
-    image::with_target_hq_image(|target_ref| unsafe {
+    image::with_target_hq_image(|target_ref| {
         if pname == gl::UNPACK_ROW_LENGTH {
             let width = match target_ref {
                 image::TargetMut::Background(background) => background.width,

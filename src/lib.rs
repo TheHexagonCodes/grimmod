@@ -4,6 +4,7 @@ mod config;
 mod debug;
 mod feature;
 mod file;
+mod init;
 mod macros;
 mod misc;
 mod raw;
@@ -13,23 +14,6 @@ use std::ffi::c_void;
 use windows::Win32::Foundation::{BOOL, HMODULE};
 use windows::Win32::System::LibraryLoader::DisableThreadLibraryCalls;
 use windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
-
-fn main() {
-    debug::info("GrimMod attached to GrimFandango.exe");
-
-    debug::info(format!(
-        "Base memory address found: 0x{:x}",
-        *raw::memory::BASE_ADDRESS
-    ));
-
-    feature::mods();
-    feature::hq_assets();
-    feature::quick_toggle();
-    feature::vsync();
-    feature::hdpi_fix();
-
-    misc::validate_mods();
-}
 
 #[no_mangle]
 pub extern "system" fn DllMain(
@@ -42,7 +26,7 @@ pub extern "system" fn DllMain(
             let _ = DisableThreadLibraryCalls(hinstance);
             raw::proxy::attach();
         }
-        main();
+        init::main();
     }
     BOOL(1)
 }

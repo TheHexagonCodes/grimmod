@@ -2,6 +2,7 @@ use once_cell::sync::Lazy;
 use retour::RawDetour;
 use std::marker::PhantomData;
 use std::mem;
+use std::sync::Mutex;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::BOOL;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -211,12 +212,12 @@ impl<F> IndirectFn<F> {
         write(self.address(), replacement_addr);
     }
 
-    pub unsafe fn unhook(&mut self) {
-        if let Some(original_addr) = self.hooked {
-            write(self.address(), original_addr);
-            self.hooked = None;
-        }
-    }
+    // pub unsafe fn unhook(&mut self) {
+    //     if let Some(original_addr) = self.hooked {
+    //         write(self.address(), original_addr);
+    //         self.hooked = None;
+    //     }
+    // }
 
     pub unsafe fn fn_addr(&self) -> usize {
         if let Some(original_addr) = self.hooked {

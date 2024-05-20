@@ -31,7 +31,9 @@ pub fn hq_assets() {
         grim::bind_image_surface.hook(graphics::bind_image_surface as grim::BindImageSurface);
         grim::surface_upload.hook(graphics::surface_upload as grim::SurfaceUpload);
         grim::setup_draw.hook(graphics::setup_draw as grim::SetupDraw);
-        gl::delete_textures.hook(graphics::delete_textures as gl::DeleteTextures);
+        gl::delete_textures
+            .hook(graphics::delete_textures as gl::DeleteTextures)
+            .ok();
 
         if Config::get().renderer.video_cutouts {
             grim::init_gfx.hook(graphics::init_gfx as grim::InitGfx);

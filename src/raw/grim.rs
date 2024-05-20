@@ -2,9 +2,13 @@
 
 use std::ffi::{c_char, c_int, c_uint, c_void, CStr};
 
-use crate::fns;
 use crate::raw::gl;
 use crate::raw::memory::Value;
+use crate::{bound_fns, fns};
+
+bound_fns! {
+    extern "stdcall" fn entry();
+}
 
 fns! {
     // file operation functions that work with LAB packed files

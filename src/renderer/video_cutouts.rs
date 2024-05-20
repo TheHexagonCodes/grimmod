@@ -62,12 +62,10 @@ pub fn bind_for(name: &str) {
 
 pub fn create_stencil_buffer() {
     let mut stencil_buffer = 0;
-    unsafe {
-        gl::gen_renderbuffers(1, &mut stencil_buffer);
-        gl::bind_renderbuffer(gl::RENDERBUFFER, stencil_buffer);
-        gl::renderbuffer_storage(gl::RENDERBUFFER, gl::DEPTH24_STENCIL8, 640, 480);
-        gl::bind_renderbuffer(gl::RENDERBUFFER, 0);
-    }
+    gl::gen_renderbuffers(1, &mut stencil_buffer);
+    gl::bind_renderbuffer(gl::RENDERBUFFER, stencil_buffer);
+    gl::renderbuffer_storage(gl::RENDERBUFFER, gl::DEPTH24_STENCIL8, 640, 480);
+    gl::bind_renderbuffer(gl::RENDERBUFFER, 0);
     let (vao, vbo) = create_stencil_vao();
     *STENCIL_BUFFER.lock().unwrap() = StencilBuffer::new(stencil_buffer, 0, vao, vbo, 640, 480);
 }
@@ -77,113 +75,95 @@ fn create_stencil_vao() -> (gl::Uint, gl::Uint) {
     let mut vao = 0;
     let mut vbo = 0;
 
-    unsafe {
-        gl::get_integerv(gl::VERTEX_ARRAY_BINDING, &mut previous_vao);
-        gl::gen_vertex_arrays(1, &mut vao);
-        gl::gen_buffers(1, &mut vbo);
-        gl::bind_vertex_array(vao);
+    gl::get_integerv(gl::VERTEX_ARRAY_BINDING, &mut previous_vao);
+    gl::gen_vertex_arrays(1, &mut vao);
+    gl::gen_buffers(1, &mut vbo);
+    gl::bind_vertex_array(vao);
 
-        gl::bind_buffer(gl::ARRAY_BUFFER, vbo);
+    gl::bind_buffer(gl::ARRAY_BUFFER, vbo);
 
-        gl::vertex_attrib_pointer(
-            0,
-            2,
-            gl::FLOAT,
-            0,
-            2 * std::mem::size_of::<f32>() as gl::Sizei,
-            std::ptr::null(),
-        );
-        gl::enable_vertex_attrib_array(0);
+    let vertices_size = 2 * std::mem::size_of::<f32>() as gl::Sizei;
+    gl::vertex_attrib_pointer(0, 2, gl::FLOAT, 0, vertices_size, std::ptr::null());
+    gl::enable_vertex_attrib_array(0);
 
-        gl::bind_buffer(gl::ARRAY_BUFFER, 0);
-        gl::bind_vertex_array(previous_vao as gl::Uint);
-    }
+    gl::bind_buffer(gl::ARRAY_BUFFER, 0);
+    gl::bind_vertex_array(previous_vao as gl::Uint);
 
     (vao, vbo)
 }
 
 pub fn bind_stencil_vos(stencil_buffer: &mut StencilBuffer, verticies: &'static [f32]) {
     stencil_buffer.n_vertices = verticies.len();
-    unsafe {
-        gl::bind_buffer(gl::ARRAY_BUFFER, stencil_buffer.vbo);
-        gl::buffer_data(
-            gl::ARRAY_BUFFER,
-            std::mem::size_of_val(verticies) as gl::Sizei,
-            verticies.as_ptr() as *mut _,
-            gl::STATIC_DRAW,
-        );
-    }
+    gl::bind_buffer(gl::ARRAY_BUFFER, stencil_buffer.vbo);
+    gl::buffer_data(
+        gl::ARRAY_BUFFER,
+        std::mem::size_of_val(verticies) as gl::Sizei,
+        verticies.as_ptr() as *mut _,
+        gl::STATIC_DRAW,
+    );
 }
 
 pub fn attach_stencil_buffer(stencil_buffer: &mut StencilBuffer, width: gl::Int, height: gl::Int) {
-    unsafe {
-        gl::bind_renderbuffer(gl::RENDERBUFFER, stencil_buffer.renderbuffer);
-        if (width, height) != (stencil_buffer.width, stencil_buffer.height) {
-            gl::renderbuffer_storage(gl::RENDERBUFFER, gl::DEPTH24_STENCIL8, width, height);
-            stencil_buffer.width = width;
-            stencil_buffer.height = height;
-        }
-        gl::framebuffer_renderbuffer(
-            gl::FRAMEBUFFER,
-            gl::STENCIL_ATTACHMENT,
-            gl::RENDERBUFFER,
-            stencil_buffer.renderbuffer,
-        );
-        gl::bind_renderbuffer(gl::RENDERBUFFER, 0);
+    gl::bind_renderbuffer(gl::RENDERBUFFER, stencil_buffer.renderbuffer);
+    if (width, height) != (stencil_buffer.width, stencil_buffer.height) {
+        gl::renderbuffer_storage(gl::RENDERBUFFER, gl::DEPTH24_STENCIL8, width, height);
+        stencil_buffer.width = width;
+        stencil_buffer.height = height;
     }
+    gl::framebuffer_renderbuffer(
+        gl::FRAMEBUFFER,
+        gl::STENCIL_ATTACHMENT,
+        gl::RENDERBUFFER,
+        stencil_buffer.renderbuffer,
+    );
+    gl::bind_renderbuffer(gl::RENDERBUFFER, 0);
 }
 
 pub fn detach_stencil_buffer() {
-    unsafe {
-        gl::disable(gl::STENCIL_TEST);
-        gl::framebuffer_renderbuffer(gl::FRAMEBUFFER, gl::STENCIL_ATTACHMENT, gl::RENDERBUFFER, 0);
-    }
+    gl::disable(gl::STENCIL_TEST);
+    gl::framebuffer_renderbuffer(gl::FRAMEBUFFER, gl::STENCIL_ATTACHMENT, gl::RENDERBUFFER, 0);
 }
 
 pub fn with_stencil<F: Fn()>(draw: F) {
     let mut stencil_buffer = STENCIL_BUFFER.lock().unwrap();
     let mut previous_vao = 0;
     let mut viewport: [gl::Int; 4] = [0; 4];
-    unsafe {
-        gl::get_integerv(gl::VERTEX_ARRAY_BINDING, &mut previous_vao);
-        gl::get_integerv(gl::VIEWPORT, viewport.as_mut_ptr());
-    }
+    gl::get_integerv(gl::VERTEX_ARRAY_BINDING, &mut previous_vao);
+    gl::get_integerv(gl::VIEWPORT, viewport.as_mut_ptr());
     let [_, _, viewport_width, viewport_height] = viewport;
 
     attach_stencil_buffer(&mut stencil_buffer, viewport_width, viewport_height);
     draw_stencil_mask(&stencil_buffer);
     drop(stencil_buffer);
 
-    unsafe { gl::bind_vertex_array(previous_vao as u32) };
+    gl::bind_vertex_array(previous_vao as u32);
     draw();
 
     detach_stencil_buffer();
 }
 
 pub fn draw_stencil_mask(stencil_buffer: &StencilBuffer) {
-    unsafe {
-        gl::clear(gl::STENCIL_BUFFER_BIT);
+    gl::clear(gl::STENCIL_BUFFER_BIT);
 
-        gl::enable(gl::STENCIL_TEST);
+    gl::enable(gl::STENCIL_TEST);
 
-        gl::stencil_func(gl::ALWAYS, 1, 0xFF);
-        gl::stencil_op(gl::KEEP, gl::REPLACE, gl::REPLACE);
-        gl::stencil_mask(0xFF);
-        gl::color_mask(0, 0, 0, 0);
-        gl::depth_mask(0);
+    gl::stencil_func(gl::ALWAYS, 1, 0xFF);
+    gl::stencil_op(gl::KEEP, gl::REPLACE, gl::REPLACE);
+    gl::stencil_mask(0xFF);
+    gl::color_mask(0, 0, 0, 0);
+    gl::depth_mask(0);
 
-        gl::bind_vertex_array(stencil_buffer.vao);
-        gl::draw_arrays(
-            gl::TRIANGLES,
-            0,
-            stencil_buffer.n_vertices as gl::Sizei / 2 as gl::Sizei,
-        );
-        gl::color_mask(1, 1, 1, 1);
-        gl::depth_mask(1);
+    gl::bind_vertex_array(stencil_buffer.vao);
+    gl::draw_arrays(
+        gl::TRIANGLES,
+        0,
+        stencil_buffer.n_vertices as gl::Sizei / 2 as gl::Sizei,
+    );
+    gl::color_mask(1, 1, 1, 1);
+    gl::depth_mask(1);
 
-        gl::stencil_func(gl::EQUAL, 1, 0xFF);
-        gl::stencil_op(gl::KEEP, gl::KEEP, gl::KEEP);
-    }
+    gl::stencil_func(gl::EQUAL, 1, 0xFF);
+    gl::stencil_op(gl::KEEP, gl::KEEP, gl::KEEP);
 }
 
 #[rustfmt::skip]

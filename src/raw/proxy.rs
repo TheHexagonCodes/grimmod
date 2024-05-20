@@ -6,8 +6,6 @@ use windows::Win32::Foundation::{HMODULE, MAX_PATH};
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
 use windows::Win32::System::SystemInformation::GetSystemDirectoryA;
 
-use crate::raw::gl;
-
 macro_rules! proxy {
     (fn $name:ident($($arg_name:ident : $arg_ty:ty),*)) => {
         proxy!(fn $name($($arg_name: $arg_ty),*) -> ());
@@ -40,18 +38,6 @@ proxy!(fn gluTessNormal(tess: *mut c_void, x: f64, y: f64, z: f64));
 proxy!(fn gluTessCallback(tess: *mut c_void, which: c_uint, cb: *mut c_void));
 proxy!(fn gluTessVertex(tess: *mut c_void, location: *mut f64, data: *mut c_void));
 
-proxy!(fn glGetError() -> gl::Enum);
-proxy!(fn glDrawArrays(mode: gl::Enum, first: gl::Int, count: gl::Sizei));
-proxy!(fn glStencilFunc(func: gl::Enum, ref_value: gl::Int, mask: gl::Uint));
-proxy!(fn glStencilOp(sfail: gl::Enum, dpfail: gl::Enum, dppass: gl::Enum));
-proxy!(fn glStencilMask(mask: gl::Uint));
-proxy!(fn glColorMask(red: gl::Uint, green: gl::Uint, blue: gl::Uint, alpha: gl::Uint));
-proxy!(fn glDepthMask(flag: gl::Uint));
-proxy!(fn glVertex2f(x: f32, y: f32));
-proxy!(fn glClear(mask: u32));
-proxy!(fn glBegin(mode: gl::Enum));
-proxy!(fn glEnd());
-
 pub unsafe fn attach() -> Option<()> {
     let glu32 = load_library(&system_glu32_path())?;
 
@@ -67,20 +53,6 @@ pub unsafe fn attach() -> Option<()> {
     GLU_TESS_CALLBACK = transmute(get_proc(glu32, "gluTessCallback"));
     GLU_TESS_VERTEX = transmute(get_proc(glu32, "gluTessVertex"));
 
-    let opengl32 = load_library(&system_opengl32_path())?;
-
-    GL_GET_ERROR = transmute(get_proc(opengl32, "glGetError"));
-    GL_DRAW_ARRAYS = transmute(get_proc(opengl32, "glDrawArrays"));
-    GL_STENCIL_FUNC = transmute(get_proc(opengl32, "glStencilFunc"));
-    GL_STENCIL_OP = transmute(get_proc(opengl32, "glStencilOp"));
-    GL_STENCIL_MASK = transmute(get_proc(opengl32, "glStencilMask"));
-    GL_COLOR_MASK = transmute(get_proc(opengl32, "glColorMask"));
-    GL_DEPTH_MASK = transmute(get_proc(opengl32, "glDepthMask"));
-    GL_VERTEX2F = transmute(get_proc(opengl32, "glVertex2f"));
-    GL_CLEAR = transmute(get_proc(opengl32, "glClear"));
-    GL_BEGIN = transmute(get_proc(opengl32, "glBegin"));
-    GL_END = transmute(get_proc(opengl32, "glEnd"));
-
     Some(())
 }
 
@@ -94,14 +66,6 @@ pub fn system_glu32_path() -> String {
     let length = unsafe { GetSystemDirectoryA(Some(&mut buffer)) };
     let mut path = String::from_utf8_lossy(&buffer[..length as usize]).to_string();
     path.push_str("\\glu32.dll");
-    path
-}
-
-pub fn system_opengl32_path() -> String {
-    let mut buffer = vec![0u8; MAX_PATH as usize];
-    let length = unsafe { GetSystemDirectoryA(Some(&mut buffer)) };
-    let mut path = String::from_utf8_lossy(&buffer[..length as usize]).to_string();
-    path.push_str("\\opengl32.dll");
     path
 }
 

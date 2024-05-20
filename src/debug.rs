@@ -47,7 +47,7 @@ pub fn gl<T: AsRef<str>>(message: T) -> Option<()> {
 
 #[allow(dead_code)]
 pub fn gl_error() -> Option<u32> {
-    let gl_err = unsafe { gl::get_error() };
+    let gl_err = gl::get_error();
     if gl_err != 0 {
         error(format!("OpenGL: {}", gl_err));
         Some(gl_err)
