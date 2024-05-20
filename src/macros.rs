@@ -33,3 +33,20 @@ macro_rules! fn_refs {
         })*
     };
 }
+
+#[macro_export]
+macro_rules! bound_fns {
+    (
+        $(
+            extern $conv:literal fn $name:ident($($arg:ident : $arg_ty:ty),* $(,)?) $(-> $ret:ty)?;
+        )*
+    ) => {
+        $(paste::paste! {
+            pub type [<$name:camel>] =
+                extern $conv fn($($arg: $arg_ty),*) $(-> $ret)?;
+
+            pub static $name: $crate::raw::memory::BoundFn<[<$name:camel>]> =
+                $crate::raw::memory::BoundFn::new(stringify!($name));
+        })*
+    };
+}

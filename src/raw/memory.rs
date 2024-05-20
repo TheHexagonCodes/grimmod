@@ -277,6 +277,145 @@ impl_indirect_fn_traits!(A, B, C, D, E, F, G, H);
 impl_indirect_fn_traits!(A, B, C, D, E, F, G, H, I);
 impl_indirect_fn_traits!(A, B, C, D, E, F, G, H, I, J);
 
+pub struct BoundFn<F> {
+    pub name: &'static str,
+    pub addr: Mutex<usize>,
+    pub hook: Mutex<Option<RawDetour>>,
+    fn_type: PhantomData<F>,
+}
+
+impl<F> BoundFn<F> {
+    pub const fn new(name: &'static str) -> BoundFn<F> {
+        BoundFn {
+            name,
+            addr: Mutex::new(0),
+            hook: Mutex::new(None),
+            fn_type: PhantomData,
+        }
+    }
+
+    pub fn bind(&self, addr: usize) {
+        *self.addr.lock().unwrap() = addr;
+    }
+
+    pub fn hook(&self, replacement: F) -> Result<(), HookError> {
+        let addr = self.get_addr();
+        if addr == 0 {
+            return Err(HookError::Unbound(self.name.to_string()));
+        }
+
+        let mut hook_guard = self.hook.lock().unwrap();
+        if hook_guard.is_some() {
+            return Err(HookError::AlreadyHooked(self.name.to_string()));
+        }
+
+        let hook = unsafe {
+            let replacement_addr = *(&replacement as *const F as *const usize);
+            RawDetour::new(self.get_addr() as *const (), replacement_addr as *const ())
+                .and_then(|hook| hook.enable().map(|_| hook))
+                .map_err(|err| HookError::Retour(self.name.to_string(), err))?
+        };
+
+        *hook_guard = Some(hook);
+        Ok(())
+    }
+
+    pub fn unhook(&self) -> Result<(), UnhookError> {
+        if let Some(hook) = self.hook.lock().unwrap().take() {
+            unsafe {
+                hook.disable()
+                    .map_err(|err| UnhookError::Retour(self.name.to_string(), err))
+            }
+        } else {
+            Err(UnhookError::NotHooked(self.name.to_string()))
+        }
+    }
+
+    pub fn get_addr(&self) -> usize {
+        *self.addr.lock().unwrap()
+    }
+
+    pub fn original_fn_addr(&self) -> Option<usize> {
+        if let Some(hook) = &self.hook.lock().unwrap().as_ref() {
+            Some(hook.trampoline() as *const _ as usize)
+        } else {
+            let addr = self.get_addr();
+            (addr != 0).then_some(addr)
+        }
+    }
+
+    pub fn original_fn_addr_or_panic(&self) -> usize {
+        if let Some(f) = self.original_fn_addr() {
+            f
+        } else {
+            let error = format!("Tried to call unbound function '{}'", self.name);
+            debug::error(&error);
+            panic!("{}", &error)
+        }
+    }
+}
+
+pub enum HookError {
+    Unbound(String),
+    AlreadyHooked(String),
+    Retour(String, retour::Error),
+}
+
+pub enum UnhookError {
+    NotHooked(String),
+    Retour(String, retour::Error),
+}
+
+macro_rules! impl_bound_extern_fn_traits {
+    ($conv:literal, $($T:ident),*) => {
+        #[allow(non_snake_case)]
+        impl<$($T,)* R> FnOnce<($($T,)*)> for BoundFn<extern $conv fn($($T,)*) -> R> {
+            type Output = R;
+
+            extern "rust-call" fn call_once(self, ($($T,)*): ($($T,)*)) -> R {
+                let f: extern $conv fn($($T,)*) -> R = unsafe { std::mem::transmute(self.original_fn_addr_or_panic()) };
+                (f)($($T,)*)
+            }
+        }
+
+        #[allow(non_snake_case)]
+        impl<$($T, )* R> FnMut<($($T,)*)> for BoundFn<extern $conv fn($($T,)*) -> R> {
+            extern "rust-call" fn call_mut(&mut self, ($($T,)*): ($($T,)*)) -> R {
+                let f: extern $conv fn($($T,)*) -> R = unsafe { std::mem::transmute(self.original_fn_addr_or_panic()) };
+                (f)($($T,)*)
+            }
+        }
+
+        #[allow(non_snake_case)]
+        impl<$($T, )* R> Fn<($($T,)*)> for BoundFn<extern $conv fn($($T,)*) -> R> {
+            extern "rust-call" fn call(&self, ($($T,)*): ($($T,)*)) -> R {
+                let f: extern $conv fn($($T,)*) -> R = unsafe { std::mem::transmute(self.original_fn_addr_or_panic()) };
+                (f)($($T,)*)
+            }
+        }
+    };
+}
+
+macro_rules! impl_bound_fn_traits {
+    ($($T:ident),*) => {
+        impl_bound_extern_fn_traits!("C", $($T),*);
+        impl_bound_extern_fn_traits!("stdcall", $($T),*);
+        impl_bound_extern_fn_traits!("fastcall", $($T),*);
+    }
+}
+
+impl_bound_fn_traits!();
+impl_bound_fn_traits!(A);
+impl_bound_fn_traits!(A, B);
+impl_bound_fn_traits!(A, B, C);
+impl_bound_fn_traits!(A, B, C, D);
+impl_bound_fn_traits!(A, B, C, D, E);
+impl_bound_fn_traits!(A, B, C, D, E, F);
+impl_bound_fn_traits!(A, B, C, D, E, F, G);
+impl_bound_fn_traits!(A, B, C, D, E, F, G, H);
+impl_bound_fn_traits!(A, B, C, D, E, F, G, H, I);
+impl_bound_fn_traits!(A, B, C, D, E, F, G, H, I, J);
+
 pub struct Value<T> {
     pub relative_address: usize,
     value_type: PhantomData<T>,
