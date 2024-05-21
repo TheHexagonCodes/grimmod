@@ -22,7 +22,9 @@ use crate::{debug, feature, misc};
 pub fn main() {
     debug::info("GrimMod attached to GrimFandango.exe");
 
-    debug::info(format!("Base memory address found: 0x{:x}", *BASE_ADDRESS));
+    if debug::verbose() {
+        debug::info(format!("Base memory address found: 0x{:x}", *BASE_ADDRESS));
+    }
 
     if let Err(err) = initiate_startup() {
         debug::error(format!("GrimMod startup failed: {}", err));
