@@ -32,10 +32,6 @@ pub fn base_address() -> Option<usize> {
     }
 }
 
-pub fn relative_address(address: usize) -> usize {
-    *BASE_ADDRESS + address
-}
-
 pub unsafe fn as_ref<'a, T: Sized>(address: usize) -> Option<&'a T> {
     (address as *const T).as_ref()
 }
@@ -292,37 +288,59 @@ impl_bound_fn_traits!(A, B, C, D, E, F, G, H);
 impl_bound_fn_traits!(A, B, C, D, E, F, G, H, I);
 impl_bound_fn_traits!(A, B, C, D, E, F, G, H, I, J);
 
-pub struct Value<T> {
-    pub relative_address: usize,
+pub struct Value<T, F: 'static> {
+    name: &'static str,
+    relative_to: &'static BoundFn<F>,
+    offset: usize,
+    addr: Mutex<Option<usize>>,
     value_type: PhantomData<T>,
 }
 
-impl<T> Value<T> {
-    pub const fn new(relative_address: usize) -> Value<T> {
+impl<T, F> Value<T, F> {
+    pub const fn new(
+        name: &'static str,
+        relative_to: &'static BoundFn<F>,
+        offset: usize,
+    ) -> Value<T, F> {
         Value {
-            relative_address,
+            name,
+            relative_to,
+            offset,
+            addr: Mutex::new(None),
             value_type: PhantomData,
         }
     }
 
     pub fn addr(&self) -> usize {
-        relative_address(self.relative_address)
+        let mut addr_guard = self.addr.lock().unwrap();
+        match *addr_guard {
+            Some(addr) => addr,
+            None => {
+                let ref_addr = self.relative_to.get_addr() + self.offset;
+                let addr = unsafe { std::ptr::read(ref_addr as *const usize) };
+                if debug::verbose() {
+                    debug::info(format!("Found address for static {}: 0x{:x}", self.name, addr));
+                }
+                *addr_guard = Some(addr);
+                addr
+            }
+        }
     }
 }
 
-impl<T> Value<T> {
+impl<T, F> Value<T, F> {
     pub unsafe fn as_ref<'a>(&self) -> Option<&'a T> {
         as_ref::<T>(self.addr())
     }
 }
 
-impl<T: Clone> Value<T> {
+impl<T: Clone, F> Value<T, F> {
     pub unsafe fn get(&self) -> T {
         self.as_ref().cloned().unwrap()
     }
 }
 
-impl<T> Value<*const T> {
+impl<T, F> Value<*const T, F> {
     pub unsafe fn inner_addr(&self) -> usize {
         read::<usize>(self.addr())
     }

@@ -93,6 +93,36 @@ bound_fns! {
     // Leaves a marker for debugging OpenGL calls
     #[pattern("55 8b ec 57 8b 3d ?? ?? ?? ?? 85 ff 74 17", 0x0)]
     extern "C" fn marker(len: usize, message: *const c_char);
+
+    // The following functions are only used to find static values
+
+    // Allocates the base image buffer
+    #[pattern("55 8b ec 8b 15 ?? ?? ?? ?? 83 ec 08 56 8d 45 f8 50 8d 4d fc 51 52", 0x0)]
+    extern "C" fn init_base_buffer() -> c_uint;
+
+    // Intializes main software front/back buffers
+    #[pattern("55 8b ec 8b 45 08 3b 05 ?? ?? ?? ?? 72 04 33 c0 5d c3", 0x0)]
+    extern "C" fn init_software_buffers();
+
+    // Intializes the buffer used to decode smush video frames
+    #[pattern("75 07 b8 01 00 00 00 5d c3 a1 ?? ?? ?? ?? 56 8b 75 08", 0xA)]
+    extern "C" fn init_smush_buffer();
+
+    // Resets some of the buffers used for temporary work
+    #[pattern("a1 ?? ?? ?? ?? 56 33 f6 3b c6 74 0f 50", 0x0)]
+    extern "C" fn reset_intermediate_buffers();
+
+    // Decodes the next smush frame (not fully known, unnecessary)
+    #[pattern("55 8b ec 81 ec 7c 04 00 00 a1 ?? ?? ?? ?? 33 c5", 0x0)]
+    extern "C" fn decode_smush_frame();
+
+    // Defines and inits most of the shaders and render steps for the remaster
+    #[pattern("a3 ?? ?? ?? ?? e8 ?? ?? ?? ?? 83 c4 04 a3 ?? ?? ?? ?? c3", 0x359)]
+    extern "C" fn init_shaders_and_render_passes();
+
+    // Begins toggling between the software and remaster renderer
+    #[pattern("55 8b ec 83 ec 08 56 57 8b 7d 08 33 f6 3b fe 0f 85 3c 01 00 00", 0x0)]
+    extern "C" fn toggle_renderers();
 }
 
 pub fn find_fns(code_addr: usize, code_size: usize) -> Result<(), BindError> {
@@ -112,22 +142,44 @@ pub fn find_fns(code_addr: usize, code_size: usize) -> Result<(), BindError> {
     draw_indexed_primitives.find(code_addr, code_size)?;
     marker.find(code_addr, code_size)?;
 
+    init_base_buffer.find(code_addr, code_size)?;
+    init_software_buffers.find(code_addr, code_size)?;
+    init_smush_buffer.find(code_addr, code_size)?;
+    reset_intermediate_buffers.find(code_addr, code_size)?;
+    decode_smush_frame.find(code_addr, code_size)?;
+    init_shaders_and_render_passes.find(code_addr, code_size)?;
+    toggle_renderers.find(code_addr, code_size)?;
+
     Ok(())
 }
 
-// buffers used for backgrounds and overlays
-pub static mut DECOMPRESSION_BUFFER: Value<*const Image> = Value::new(0x1691C78);
-pub static mut CLEAN_BUFFER: Value<*const Image> = Value::new(0x1691C7C);
-pub static mut CLEAN_Z_BUFFER: Value<*const Image> = Value::new(0x1691C80);
-pub static mut BACK_BUFFER: Value<Image> = Value::new(0x31B4DA0);
-pub static mut SMUSH_BUFFER: Value<*const Image> = Value::new(0x16A8474);
-pub static mut ACTIVE_SMUSH_FRAME: Value<*const SmushFrame> = Value::new(0x1714B98);
-// backgrounds' render pass data
-pub static mut BITMAP_UNDERLAYS_RENDER_PASS: Value<*const RenderPass> = Value::new(0x30861E4);
-pub static mut RENDERING_MODE: Value<f32> = Value::new(0x2E81230);
-pub static mut GAME_WINDOW: Value<*const c_void> = Value::new(0x2E81244);
-
-pub static mut TEXTURED_QUAD_SHADER: Value<*const Shader> = Value::new(0x2E81848);
+pub static mut BACK_BUFFER: Value<Image, InitSoftwareBuffers> =
+    Value::new("BACK_BUFFER", &init_software_buffers, 0xD1);
+pub static mut SMUSH_BUFFER: Value<*const Image, InitSmushBuffer> =
+    Value::new("SMUSH_BUFFER", &init_smush_buffer, 0x14);
+pub static mut DECOMPRESSION_BUFFER: Value<*const Image, ResetIntermediateBuffers> =
+    Value::new("DECOMPRESSION_BUFFER", &reset_intermediate_buffers, 0x4C);
+pub static mut CLEAN_BUFFER: Value<*const Image, ResetIntermediateBuffers> =
+    Value::new("CLEAN_BUFFER", &reset_intermediate_buffers, 0x1C);
+pub static mut CLEAN_Z_BUFFER: Value<*const Image, ResetIntermediateBuffers> =
+    Value::new("CLEAN_Z_BUFFER", &reset_intermediate_buffers, 0x34);
+pub static mut ACTIVE_SMUSH_FRAME: Value<*const SmushFrame, DecodeSmushFrame> =
+    Value::new("ACTIVE_SMUSH_FRAME", &decode_smush_frame, 0x7C);
+pub static mut BITMAP_UNDERLAYS_RENDER_PASS: Value<*const RenderPass, InitShadersAndRenderPasses> =
+    Value::new(
+        "BITMAP_UNDERLAYS_RENDER_PASS",
+        &init_shaders_and_render_passes,
+        0x30C,
+    );
+pub static mut TEXTURED_QUAD_SHADER: Value<*const Shader, InitShadersAndRenderPasses> = Value::new(
+    "TEXTURED_QUAD_SHADER",
+    &init_shaders_and_render_passes,
+    0x1F,
+);
+pub static mut GAME_WINDOW: Value<*const c_void, InitBaseBuffer> =
+    Value::new("GAME_WINDOW", &init_base_buffer, 0x5);
+pub static mut RENDERING_MODE: Value<f32, ToggleRenderers> =
+    Value::new("RENDERING_MODE", &toggle_renderers, 0x5C);
 
 /// LLVM's libc++ std::vector
 #[repr(C)]
