@@ -1,14 +1,13 @@
 #![allow(non_upper_case_globals)]
 
-use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_void};
 use windows::Win32::Foundation::{BOOL, HMODULE, HWND};
 use windows::Win32::Graphics::Gdi::HDC;
 
-use crate::bound_fns;
+use crate::indirect_fns;
 use crate::raw::memory::BindError;
 
-bound_fns! {
+indirect_fns! {
     extern "C" fn set_swap_interval(interval: c_int) -> c_int;
     extern "C" fn create_window(
         title: *const c_char,
@@ -55,12 +54,12 @@ pub struct Rect {
 
 pub const WINDOW_ALLOW_HIGHDPI: u32 = 0x00002000;
 
-pub fn bind_static_fns(import_map: &HashMap<String, usize>) -> Result<(), BindError> {
-    set_swap_interval.bind_from_imports("SDL_GL_SetSwapInterval", import_map)?;
-    create_window.bind_from_imports("SDL_CreateWindow", import_map)?;
-    get_window_wminfo.bind_from_imports("SDL_GetWindowWMInfo", import_map)?;
-    get_display_bounds.bind_from_imports("SDL_GetDisplayBounds", import_map)?;
-    get_current_display_mode.bind_from_imports("SDL_GetCurrentDisplayMode", import_map)?;
+pub fn bind_static_fns() -> Result<(), BindError> {
+    set_swap_interval.bind_symbol("SDL_GL_SetSwapInterval")?;
+    create_window.bind_symbol("SDL_CreateWindow")?;
+    get_window_wminfo.bind_symbol("SDL_GetWindowWMInfo")?;
+    get_display_bounds.bind_symbol("SDL_GetDisplayBounds")?;
+    get_current_display_mode.bind_symbol("SDL_GetCurrentDisplayMode")?;
 
     Ok(())
 }

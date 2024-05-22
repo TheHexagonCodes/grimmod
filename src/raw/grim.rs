@@ -2,11 +2,11 @@
 
 use std::ffi::{c_char, c_int, c_uint, c_void, CStr};
 
-use crate::bound_fns;
+use crate::direct_fns;
 use crate::raw::gl;
 use crate::raw::memory::{BindError, Value};
 
-bound_fns! {
+direct_fns! {
     extern "stdcall" fn entry();
 
     // Initialize the basic graphics components

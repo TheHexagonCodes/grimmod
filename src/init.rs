@@ -1,18 +1,11 @@
-use std::collections::HashMap;
-use std::ffi::CStr;
 use std::ptr;
-use windows::Win32::System::Diagnostics::Debug::{
-    IMAGE_DIRECTORY_ENTRY_IMPORT, IMAGE_NT_HEADERS32,
-};
+
+use windows::Win32::System::Diagnostics::Debug::IMAGE_NT_HEADERS32;
 use windows::Win32::System::LibraryLoader::GetModuleHandleA;
 use windows::Win32::System::Memory::{
     VirtualQuery, MEMORY_BASIC_INFORMATION, MEM_COMMIT, PAGE_EXECUTE_READ,
 };
-use windows::Win32::System::SystemServices::{
-    IMAGE_DOS_HEADER, IMAGE_DOS_SIGNATURE, IMAGE_IMPORT_BY_NAME, IMAGE_IMPORT_DESCRIPTOR,
-    IMAGE_NT_SIGNATURE,
-};
-use windows::Win32::System::WindowsProgramming::IMAGE_THUNK_DATA32;
+use windows::Win32::System::SystemServices::{IMAGE_DOS_HEADER, IMAGE_DOS_SIGNATURE};
 
 use crate::raw::memory::{HookError, BASE_ADDRESS};
 use crate::raw::{gl, grim, sdl};
@@ -43,28 +36,33 @@ fn initiate_startup() -> Result<(), String> {
     grim::entry.hook(application_entry).string_err()
 }
 
-fn features_startup() -> Result<(), String> {
-    let imports = unsafe { get_imports() }
-        .ok_or_else(|| "Could not build the map of static imports".to_string())?;
-    sdl::bind_static_fns(&imports).string_err()?;
-    gl::bind_static_fns(&imports).string_err()?;
+fn startup() -> Result<(), String> {
+    sdl::bind_static_fns().string_err()?;
+    gl::bind_static_fns().string_err()?;
     gl::bind_dynamic_fns().string_err()?;
-    // hook the game gfx init to complete the startup
+    gl::bind_glew_fns().string_err()?;
+    init_features().string_err()?;
+
     grim::init_gfx.hook(init_gfx).string_err()?;
-    init_features().string_err()
+
+    misc::validate_mods();
+    Ok(())
 }
 
-fn complete_startup() -> Result<(), String> {
-    gl::bind_glew_fns().string_err()?;
-    video_cutouts::create_stencil_buffer();
-    misc::validate_mods();
+pub fn init_features() -> Result<(), HookError> {
+    feature::mods()?;
+    feature::hq_assets()?;
+    feature::quick_toggle()?;
+    feature::vsync()?;
+    feature::hdpi_fix()?;
+
     Ok(())
 }
 
 /// Wraps the application entry to locate and bind now-loaded functions
 extern "stdcall" fn application_entry() {
-    match features_startup() {
-        Ok(_) => debug::info("Successfully attached GrimMod feature hooks"),
+    match startup() {
+        Ok(_) => debug::info("Successfully initiated GrimMod feature hooks"),
         Err(err) => debug::error(format!("GrimMod feature hooks failed to attach: {}", err)),
     };
 
@@ -79,22 +77,9 @@ pub extern "C" fn init_gfx() -> u8 {
         return result;
     }
 
-    match complete_startup() {
-        Ok(_) => debug::info("All native game functions have been found"),
-        Err(err) => debug::error(format!("GrimMod startup completion failed: {}", err)),
-    };
+    video_cutouts::create_stencil_buffer();
 
     1
-}
-
-pub fn init_features() -> Result<(), HookError> {
-    feature::mods()?;
-    feature::hq_assets()?;
-    feature::quick_toggle()?;
-    feature::vsync()?;
-    feature::hdpi_fix()?;
-
-    Ok(())
 }
 
 /// Gets the address of the main application entry function
@@ -114,63 +99,6 @@ unsafe fn get_application_entry_addr() -> Option<usize> {
     Some(entry_point_addr as usize)
 }
 
-/// Gets a map of statically imported functions and their address
-unsafe fn get_imports() -> Option<HashMap<String, usize>> {
-    let module_handle = GetModuleHandleA(None).ok()?;
-    let dos_header: IMAGE_DOS_HEADER = std::ptr::read(module_handle.0 as *const _);
-
-    if dos_header.e_magic != IMAGE_DOS_SIGNATURE {
-        return None;
-    }
-
-    let nt_headers_addr =
-        (module_handle.0 as usize + dos_header.e_lfanew as usize) as *const IMAGE_NT_HEADERS32;
-    let nt_headers: IMAGE_NT_HEADERS32 = std::ptr::read(nt_headers_addr);
-
-    if nt_headers.Signature != IMAGE_NT_SIGNATURE {
-        return None;
-    }
-
-    let import_directory_entry = nt_headers
-        .OptionalHeader
-        .DataDirectory
-        .get(IMAGE_DIRECTORY_ENTRY_IMPORT.0 as usize)?;
-    let mut import_table = (module_handle.0 as usize
-        + import_directory_entry.VirtualAddress as usize)
-        as *mut IMAGE_IMPORT_DESCRIPTOR;
-
-    let mut imports_map = HashMap::new();
-    let mut descriptor = std::ptr::read(import_table);
-
-    while descriptor.Name != 0 {
-        let mut thunk =
-            (module_handle.0 as usize + descriptor.FirstThunk as usize) as *mut IMAGE_THUNK_DATA32;
-        let mut original_thunk = (module_handle.0 as usize
-            + descriptor.Anonymous.OriginalFirstThunk as usize)
-            as *mut IMAGE_THUNK_DATA32;
-
-        while (*original_thunk).u1.AddressOfData != 0 {
-            let import_by_name = (module_handle.0 as usize
-                + (*original_thunk).u1.AddressOfData as usize)
-                as *const IMAGE_IMPORT_BY_NAME;
-            let func_name_ptr = &(*import_by_name).Name as *const u8;
-            let func_name = CStr::from_ptr(func_name_ptr as *const i8)
-                .to_str()
-                .unwrap_or_default()
-                .to_owned();
-
-            imports_map.insert(func_name, (*thunk).u1.Function as usize);
-
-            thunk = thunk.add(1);
-            original_thunk = original_thunk.add(1);
-        }
-
-        import_table = import_table.add(1);
-        descriptor = std::ptr::read(import_table);
-    }
-
-    Some(imports_map)
-}
 
 fn get_executable_memory_region() -> Option<(usize, usize)> {
     let mut address: usize = *BASE_ADDRESS;

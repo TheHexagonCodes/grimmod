@@ -1,5 +1,5 @@
 #[macro_export]
-macro_rules! bound_fns {
+macro_rules! direct_fns {
     (
         $(
             $(#[pattern($pattern:literal, $offset:literal)])?
@@ -11,15 +11,32 @@ macro_rules! bound_fns {
                 extern $conv fn($($arg: $arg_ty),*) $(-> $ret)?;
 
             pub static $name: $crate::raw::memory::BoundFn<[<$name:camel>]> =
-                bound_fns!(@call_method $(#[pattern($pattern, $offset)])? $name);
+                direct_fns!(@call_method $(#[pattern($pattern, $offset)])? $name);
         })*
     };
 
     (@call_method #[pattern($pattern:literal, $offset:literal)] $name:ident) => {
-        $crate::raw::memory::BoundFn::new(stringify!($name), Some(($pattern, $offset)))
+        $crate::raw::memory::BoundFn::direct(stringify!($name), Some(($pattern, $offset)))
     };
 
     (@call_method $name:ident) => {
-        $crate::raw::memory::BoundFn::new(stringify!($name), None)
+        $crate::raw::memory::BoundFn::direct(stringify!($name), None)
+    };
+}
+
+#[macro_export]
+macro_rules! indirect_fns {
+    (
+        $(
+            extern $conv:literal fn $name:ident($($arg:ident : $arg_ty:ty),* $(,)?) $(-> $ret:ty)?;
+        )*
+    ) => {
+        $(paste::paste! {
+            pub type [<$name:camel>] =
+                extern $conv fn($($arg: $arg_ty),*) $(-> $ret)?;
+
+            pub static $name: $crate::raw::memory::BoundFn<[<$name:camel>]> =
+                $crate::raw::memory::BoundFn::indirect(stringify!($name));
+        })*
     };
 }

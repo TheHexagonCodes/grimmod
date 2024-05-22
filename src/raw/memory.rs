@@ -1,7 +1,6 @@
 use lightningscanner::Scanner;
 use once_cell::sync::Lazy;
 use retour::RawDetour;
-use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Mutex;
 use windows::core::PCWSTR;
@@ -13,7 +12,7 @@ use windows::Win32::System::Memory::{
 use windows::Win32::System::ProcessStatus::{GetModuleInformation, MODULEINFO};
 use windows::Win32::System::Threading::GetCurrentProcess;
 
-use crate::debug;
+use crate::{debug, raw::process};
 
 pub static BASE_ADDRESS: Lazy<usize> = Lazy::new(|| base_address().unwrap_or(0));
 
@@ -70,23 +69,51 @@ pub unsafe fn write<T: Sized>(address: usize, value: T) {
     });
 }
 
+enum FnHook {
+    Direct(Mutex<Option<RawDetour>>),
+    Indirect(Mutex<Option<usize>>),
+}
+
+impl FnHook {
+    fn is_hooked(&self) -> bool {
+        match self {
+            FnHook::Direct(mutex) => mutex.lock().unwrap().is_some(),
+            FnHook::Indirect(mutex) => mutex.lock().unwrap().is_some(),
+        }
+    }
+}
+
 pub struct BoundFn<F> {
     pub name: &'static str,
-    pub pattern: Option<(&'static str, usize)>,
     pub addr: Mutex<usize>,
-    pub hook: Mutex<Option<RawDetour>>,
+    hook: FnHook,
+    pub pattern: Option<(&'static str, usize)>,
     fn_type: PhantomData<F>,
 }
 
 impl<F> BoundFn<F> {
-    pub const fn new(name: &'static str, pattern: Option<(&'static str, usize)>) -> BoundFn<F> {
+    pub const fn direct(name: &'static str, pattern: Option<(&'static str, usize)>) -> BoundFn<F> {
         BoundFn {
             name,
-            pattern,
             addr: Mutex::new(0),
-            hook: Mutex::new(None),
+            hook: FnHook::Direct(Mutex::new(None)),
+            pattern,
             fn_type: PhantomData,
         }
+    }
+
+    pub const fn indirect(name: &'static str) -> BoundFn<F> {
+        BoundFn {
+            name,
+            addr: Mutex::new(0),
+            hook: FnHook::Indirect(Mutex::new(None)),
+            pattern: None,
+            fn_type: PhantomData,
+        }
+    }
+
+    pub fn get_addr(&self) -> usize {
+        *self.addr.lock().unwrap()
     }
 
     pub fn bind(&self, addr: usize) -> Result<(), BindError> {
@@ -97,6 +124,12 @@ impl<F> BoundFn<F> {
         } else {
             Err(BindError::AlreadyBound(self.name.to_string()))
         }
+    }
+
+    pub fn bind_symbol(&self, name: &str) -> Result<(), BindError> {
+        let addr =
+            process::get_symbol_addr(name).ok_or_else(|| BindError::NotFound(name.to_string()))?;
+        self.bind(addr)
     }
 
     pub fn find(&self, code_addr: usize, code_size: usize) -> Result<(), BindError> {
@@ -120,59 +153,75 @@ impl<F> BoundFn<F> {
         }
     }
 
-    pub fn bind_from_imports(
-        &self,
-        name: &str,
-        import_map: &HashMap<String, usize>,
-    ) -> Result<(), BindError> {
-        let import = import_map.get(name).ok_or_else(|| self.not_found())?;
-        self.bind(*import)?;
-        Ok(())
-    }
-
     pub fn hook(&self, replacement: F) -> Result<(), HookError> {
         let addr = self.get_addr();
         if addr == 0 {
             return Err(HookError::Unbound(self.name.to_string()));
         }
 
-        let mut hook_guard = self.hook.lock().unwrap();
-        if hook_guard.is_some() {
-            return Err(HookError::AlreadyHooked(self.name.to_string()));
+        if self.hook.is_hooked() {
+            return Err(self.already_hooked());
         }
 
-        let hook = unsafe {
-            let replacement_addr = *(&replacement as *const F as *const usize);
-            RawDetour::new(self.get_addr() as *const (), replacement_addr as *const ())
-                .and_then(|hook| hook.enable().map(|_| hook))
-                .map_err(|err| HookError::Retour(self.name.to_string(), err))?
-        };
+        let replacement_addr = unsafe { *(&replacement as *const F as *const usize) };
 
-        *hook_guard = Some(hook);
+        match &self.hook {
+            FnHook::Direct(mutex) => {
+                let raw_detour = unsafe {
+                    RawDetour::new(addr as *const (), replacement_addr as *const ())
+                        .and_then(|hook| hook.enable().map(|_| hook))
+                        .map_err(|err| HookError::Retour(self.name.to_string(), err))?
+                };
+                *mutex.lock().unwrap() = Some(raw_detour);
+            }
+            FnHook::Indirect(mutex) => {
+                let underlying_addr = unsafe { *(addr as *const usize) };
+                unsafe { write(addr, replacement_addr) };
+                *mutex.lock().unwrap() = Some(underlying_addr);
+            }
+        }
+
         Ok(())
     }
 
     pub fn unhook(&self) -> Result<(), UnhookError> {
-        if let Some(hook) = self.hook.lock().unwrap().take() {
-            unsafe {
-                hook.disable()
-                    .map_err(|err| UnhookError::Retour(self.name.to_string(), err))
+        match &self.hook {
+            FnHook::Direct(mutex) => {
+                let raw_detour = mutex
+                    .lock()
+                    .unwrap()
+                    .take()
+                    .ok_or_else(|| self.not_hooked())?;
+                unsafe {
+                    raw_detour
+                        .disable()
+                        .map_err(|err| UnhookError::Retour(self.name.to_string(), err))
+                }
             }
-        } else {
-            Err(UnhookError::NotHooked(self.name.to_string()))
+            FnHook::Indirect(mutex) => {
+                let underlying_addr = mutex
+                    .lock()
+                    .unwrap()
+                    .take()
+                    .ok_or_else(|| self.not_hooked())?;
+                unsafe { write(self.get_addr(), underlying_addr) };
+                Ok(())
+            }
         }
     }
 
-    pub fn get_addr(&self) -> usize {
-        *self.addr.lock().unwrap()
-    }
-
     pub fn original_fn_addr(&self) -> Option<usize> {
-        if let Some(hook) = &self.hook.lock().unwrap().as_ref() {
-            Some(hook.trampoline() as *const _ as usize)
-        } else {
-            let addr = self.get_addr();
-            (addr != 0).then_some(addr)
+        let addr = self.get_addr();
+        let unhooked = || (addr != 0).then_some(addr);
+        match &self.hook {
+            FnHook::Direct(mutex) => mutex
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|raw_detour| raw_detour.trampoline() as *const _ as usize)
+                .or_else(unhooked),
+            FnHook::Indirect(mutex) => (*mutex.lock().unwrap())
+                .or_else(|| unhooked().map(|addr| unsafe { *(addr as *const usize) })),
         }
     }
 
@@ -188,6 +237,14 @@ impl<F> BoundFn<F> {
 
     pub fn not_found(&self) -> BindError {
         BindError::NotFound(self.name.to_string())
+    }
+
+    pub fn already_hooked(&self) -> HookError {
+        HookError::AlreadyHooked(self.name.to_string())
+    }
+
+    pub fn not_hooked(&self) -> UnhookError {
+        UnhookError::NotHooked(self.name.to_string())
     }
 }
 
@@ -319,7 +376,10 @@ impl<T, F> Value<T, F> {
                 let ref_addr = self.relative_to.get_addr() + self.offset;
                 let addr = unsafe { std::ptr::read(ref_addr as *const usize) };
                 if debug::verbose() {
-                    debug::info(format!("Found address for static {}: 0x{:x}", self.name, addr));
+                    debug::info(format!(
+                        "Found address for static {}: 0x{:x}",
+                        self.name, addr
+                    ));
                 }
                 *addr_guard = Some(addr);
                 addr
