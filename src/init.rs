@@ -51,7 +51,7 @@ fn startup() -> Result<(), String> {
 pub fn init_features() -> Result<(), HookError> {
     feature::mods()?;
     feature::hq_assets()?;
-    feature::quick_toggle()?;
+    feature::always_on()?;
     feature::vsync()?;
     feature::hdpi_fix()?;
 

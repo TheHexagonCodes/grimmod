@@ -131,18 +131,3 @@ pub extern "C" fn sdl_get_current_display_mode(
         result
     }
 }
-
-pub extern "C" fn draw_software_scene(
-    draw: *const grim::Draw,
-    software_surface: *const grim::Surface,
-    transition: f32,
-) {
-    unsafe {
-        let value = if transition == 1.0 {
-            1.0
-        } else {
-            grim::RENDERING_MODE.get()
-        };
-        grim::draw_software_scene(draw, software_surface, value);
-    }
-}

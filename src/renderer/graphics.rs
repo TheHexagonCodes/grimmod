@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_uint, c_void, CStr};
 use std::sync::Mutex;
 
+use crate::config::Config;
 use crate::debug;
 use crate::raw::{gl, grim};
 use crate::renderer::{image, video_cutouts};
@@ -512,4 +513,38 @@ extern "stdcall" fn hq_pixel_storei(pname: gl::Enum, param: gl::Int) {
             gl::pixel_storei(pname, param);
         }
     })
+}
+
+/// Wraps final scene draw to make the renderer toggle instant and
+/// to make the image smooth on lower res displays
+pub extern "C" fn render_scene(
+    draw: *const grim::Draw,
+    surface: *const grim::Surface,
+    transition: f32,
+) {
+    unsafe {
+        let value = if transition == 1.0 && Config::get().renderer.quick_toggle {
+            1.0
+        } else {
+            grim::RENDERING_MODE.get()
+        };
+
+        gl::sampler_parameteri
+            .hook(forced_linear_sampler_parameteri)
+            .ok();
+        grim::render_scene(draw, surface, value);
+        gl::sampler_parameteri.unhook().ok();
+    }
+}
+
+pub extern "stdcall" fn forced_linear_sampler_parameteri(
+    target: gl::Enum,
+    pname: gl::Enum,
+    param: gl::Int,
+) {
+    if pname == gl::TEXTURE_MIN_FILTER || pname == gl::TEXTURE_MAG_FILTER {
+        gl::sampler_parameteri(target, pname, gl::LINEAR as gl::Int);
+    } else {
+        gl::sampler_parameteri(target, pname, param);
+    }
 }

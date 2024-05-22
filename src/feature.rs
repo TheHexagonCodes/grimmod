@@ -40,13 +40,9 @@ pub fn hq_assets() -> Result<(), HookError> {
     Ok(())
 }
 
-/// Change the original/remaster renderer toggle to a binary rather than smooth transition
-pub fn quick_toggle() -> Result<(), HookError> {
-    if !Config::get().renderer.quick_toggle {
-        return Ok(());
-    }
-
-    grim::draw_software_scene.hook(misc::draw_software_scene as grim::DrawSoftwareScene)?;
+/// Some functions need to be hooked always
+pub fn always_on() -> Result<(), HookError> {
+    grim::render_scene.hook(graphics::render_scene as grim::RenderScene)?;
 
     Ok(())
 }

@@ -61,7 +61,6 @@ direct_fns! {
     ) -> *mut Surface;
 
     // Prepare a surface (aka texture) for uploading to the GPU or upload it now
-
     #[pattern("55 8b ec 83 ec 18 53 56 8b 75 08 8b 46 0c 57 83 f8 12", 0x0)]
     extern "C" fn surface_upload(surface: *mut Surface, image_data: *mut c_void);
 
@@ -73,11 +72,11 @@ direct_fns! {
     #[pattern("55 8b ec 8b 45 08 8b 4d 0c 3b 48 4c 74 1a", 0x0)]
     extern "C" fn set_draw_shader(draw: *mut Draw, shader: *mut Shader);
 
-    // Draws the scene with the software renderer
+    // Draws the scene with either renderer (software, deferred)
     #[pattern("55 8b ec 81 ec 40 02 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 fc", 0x0)]
-    extern "C" fn draw_software_scene(
+    extern "C" fn render_scene(
         draw: *const Draw,
-        software_surface: *const Surface,
+        surface: *const Surface,
         transition: f32
     );
 
@@ -139,7 +138,7 @@ pub fn find_fns(code_addr: usize, code_size: usize) -> Result<(), BindError> {
     surface_upload.find(code_addr, code_size)?;
     setup_draw.find(code_addr, code_size)?;
     set_draw_shader.find(code_addr, code_size)?;
-    draw_software_scene.find(code_addr, code_size)?;
+    render_scene.find(code_addr, code_size)?;
     draw_indexed_primitives.find(code_addr, code_size)?;
     marker.find(code_addr, code_size)?;
 
