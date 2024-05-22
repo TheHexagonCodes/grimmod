@@ -1,16 +1,12 @@
 #![allow(non_upper_case_globals)]
 
 use std::ffi::{c_int, c_uint, c_void};
-use windows::core::PCSTR;
-use windows::Win32::Foundation::PROC;
 
 use crate::raw::memory::BindError;
-use crate::raw::wrappers::{with_system_dll, DllError};
 use crate::{direct_fns, indirect_fns};
 
 // static imports
 indirect_fns! {
-    extern "stdcall" fn get_proc_address(name: PCSTR) -> PROC;
     extern "stdcall" fn get_error() -> Enum;
     extern "stdcall" fn tex_image_2d(
         target: Enum,
@@ -104,7 +100,6 @@ pub const DEPTH24_STENCIL8: Enum = 0x88F0;
 pub const VERTEX_ARRAY_BINDING: Enum = 0x85B5;
 
 pub fn bind_static_fns() -> Result<(), BindError> {
-    get_proc_address.bind_symbol("wglGetProcAddress")?;
     get_error.bind_symbol("glGetError")?;
     tex_image_2d.bind_symbol("glTexImage2D")?;
     pixel_storei.bind_symbol("glPixelStorei")?;
@@ -119,15 +114,13 @@ pub fn bind_static_fns() -> Result<(), BindError> {
     Ok(())
 }
 
-pub fn bind_dynamic_fns() -> Result<(), DllError> {
-    with_system_dll("opengl32.dll", |dll| {
-        dll.bind(&draw_arrays, "glDrawArrays")?;
-        dll.bind(&stencil_func, "glStencilFunc")?;
-        dll.bind(&stencil_op, "glStencilOp")?;
-        dll.bind(&stencil_mask, "glStencilMask")?;
+pub fn bind_dynamic_fns() -> Result<(), BindError> {
+    draw_arrays.bind_virtual_import("glDrawArrays", "opengl32.dll")?;
+    stencil_func.bind_virtual_import("glStencilFunc", "opengl32.dll")?;
+    stencil_op.bind_virtual_import("glStencilOp", "opengl32.dll")?;
+    stencil_mask.bind_virtual_import("glStencilMask", "opengl32.dll")?;
 
-        Ok(())
-    })
+    Ok(())
 }
 
 pub fn bind_glew_fns() -> Result<(), BindError> {

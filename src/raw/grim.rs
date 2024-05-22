@@ -7,11 +7,12 @@ use crate::raw::gl;
 use crate::raw::memory::{BindError, Value};
 
 direct_fns! {
+    // The main application entry point, after DLL initialization
     extern "stdcall" fn entry();
 
-    // Initialize the basic graphics components
-    #[pattern("55 8b ec 51 c6 05 ?? ?? ?? ?? 01", 0x0)]
-    extern "C" fn init_gfx() -> u8;
+    // Initializes the 3 renderers (software, deferred, hardware)
+    #[pattern("c7 00 00 00 00 00 8b 0d ?? ?? ?? ?? c7 01 01 00 00 00 8b 15 ?? ?? ?? ?? c7", 0x14)]
+    extern "C" fn init_renderers();
 
     // file operation functions that work with LAB packed files
     #[pattern("55 8b ec 81 ec 20 02 00 00 a1 ?? ?? ?? ?? 33 c5", 0x0)]
@@ -126,7 +127,7 @@ direct_fns! {
 }
 
 pub fn find_fns(code_addr: usize, code_size: usize) -> Result<(), BindError> {
-    init_gfx.find(code_addr, code_size)?;
+    init_renderers.find(code_addr, code_size)?;
     open_file.find(code_addr, code_size)?;
     close_file.find(code_addr, code_size)?;
     read_file.find(code_addr, code_size)?;

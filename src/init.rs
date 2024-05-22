@@ -8,7 +8,7 @@ use windows::Win32::System::Memory::{
 use windows::Win32::System::SystemServices::{IMAGE_DOS_HEADER, IMAGE_DOS_SIGNATURE};
 
 use crate::raw::memory::{HookError, BASE_ADDRESS};
-use crate::raw::{gl, grim, sdl};
+use crate::raw::{gl, grim, process, sdl};
 use crate::renderer::video_cutouts;
 use crate::{debug, feature, misc};
 
@@ -37,15 +37,14 @@ fn initiate_startup() -> Result<(), String> {
 }
 
 fn startup() -> Result<(), String> {
+    process::bind_get_proc_address().string_err()?;
     sdl::bind_static_fns().string_err()?;
     gl::bind_static_fns().string_err()?;
-    gl::bind_dynamic_fns().string_err()?;
     gl::bind_glew_fns().string_err()?;
     init_features().string_err()?;
 
-    grim::init_gfx.hook(init_gfx).string_err()?;
+    grim::init_renderers.hook(init_renderers).string_err()?;
 
-    misc::validate_mods();
     Ok(())
 }
 
@@ -69,17 +68,26 @@ extern "stdcall" fn application_entry() {
     grim::entry();
 }
 
-/// Wraps the graphics initialization function to also bind the glew functions
-/// and create a stencil buffer for cutouts
-pub extern "C" fn init_gfx() -> u8 {
-    let result = grim::init_gfx();
-    if result != 1 {
-        return result;
-    }
+/// Wraps the renderers init function to execute some code that needs
+/// to run after gfx setup is done
+pub extern "C" fn init_renderers() {
+    // since this function executes after the window has been initialized, binding
+    // OpenGL function dynamically using (a dynamic) GetProcessAddress will allow
+    // tools like RenderDoc to intercept the call
+    match gl::bind_dynamic_fns().string_err() {
+        Ok(_) => {
+            video_cutouts::create_stencil_buffer();
+            misc::validate_mods();
+        }
+        Err(err) => {
+            debug::error(format!(
+                "Loading auxiliary OpenGL functions failed: {}",
+                err
+            ));
+        }
+    };
 
-    video_cutouts::create_stencil_buffer();
-
-    1
+    grim::init_renderers();
 }
 
 /// Gets the address of the main application entry function

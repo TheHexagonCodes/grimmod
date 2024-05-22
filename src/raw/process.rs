@@ -1,3 +1,5 @@
+#![allow(non_upper_case_globals)]
+
 use std::{
     collections::HashMap,
     ffi::{CStr, CString},
@@ -6,18 +8,31 @@ use std::{
 
 use windows::{
     core::PCSTR,
-    Win32::System::{
-        Diagnostics::Debug::{IMAGE_DIRECTORY_ENTRY_IMPORT, IMAGE_NT_HEADERS32},
-        LibraryLoader::{GetModuleHandleA, GetProcAddress},
-        SystemServices::{
-            IMAGE_DOS_HEADER, IMAGE_DOS_SIGNATURE, IMAGE_IMPORT_BY_NAME, IMAGE_IMPORT_DESCRIPTOR,
-            IMAGE_NT_SIGNATURE,
+    Win32::{
+        Foundation::{FARPROC, HMODULE},
+        System::{
+            Diagnostics::Debug::{IMAGE_DIRECTORY_ENTRY_IMPORT, IMAGE_NT_HEADERS32},
+            LibraryLoader::{GetModuleHandleA, GetProcAddress},
+            SystemServices::{
+                IMAGE_DOS_HEADER, IMAGE_DOS_SIGNATURE, IMAGE_IMPORT_BY_NAME,
+                IMAGE_IMPORT_DESCRIPTOR, IMAGE_NT_SIGNATURE,
+            },
+            WindowsProgramming::IMAGE_THUNK_DATA32,
         },
-        WindowsProgramming::IMAGE_THUNK_DATA32,
     },
 };
 
+use crate::{indirect_fns, raw::memory::BindError};
+
 static IMPORT_MAP: Mutex<Option<HashMap<String, usize>>> = Mutex::new(None);
+
+indirect_fns! {
+    extern "stdcall" fn get_proc_address(h_module: HMODULE, lp_proc_name: PCSTR) -> FARPROC;
+}
+
+pub fn bind_get_proc_address() -> Result<(), BindError> {
+    get_proc_address.bind_symbol("GetProcAddress")
+}
 
 /// Finds the dynamic address of an exposed symbol
 pub fn get_symbol_addr(name: &str) -> Option<usize> {
@@ -41,6 +56,17 @@ pub fn get_import_addr(name: &str) -> Option<usize> {
     import_map_guard
         .as_ref()
         .and_then(|import_map| import_map.get(name).cloned())
+}
+
+/// Finds the virtual address of a function at runtime
+pub fn get_import_virtual_addr(proc_name: &str, module_name: &str) -> Option<usize> {
+    let module_name_cstr = CString::new(module_name).ok()?;
+    let module = unsafe { GetModuleHandleA(PCSTR(module_name_cstr.as_ptr() as *const _)) }.ok()?;
+    let name_cstr = CString::new(proc_name).ok()?;
+    // use a dynamic GetProcAddress here for compatibility with other hooking tools
+    // e.g. RenderDoc
+    let symbol = get_proc_address(module, PCSTR(name_cstr.as_ptr() as *const _));
+    symbol.map(|symbol| symbol as usize)
 }
 
 /// Gets a map of statically imported functions and their address in the IAT

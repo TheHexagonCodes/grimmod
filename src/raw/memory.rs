@@ -127,8 +127,13 @@ impl<F> BoundFn<F> {
     }
 
     pub fn bind_symbol(&self, name: &str) -> Result<(), BindError> {
-        let addr =
-            process::get_symbol_addr(name).ok_or_else(|| BindError::NotFound(name.to_string()))?;
+        let addr = process::get_symbol_addr(name).ok_or_else(|| self.not_found())?;
+        self.bind(addr)
+    }
+
+    pub fn bind_virtual_import(&self, proc_name: &str, module_name: &str) -> Result<(), BindError> {
+        let addr = process::get_import_virtual_addr(proc_name, module_name)
+            .ok_or_else(|| self.not_found())?;
         self.bind(addr)
     }
 
