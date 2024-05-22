@@ -65,6 +65,28 @@ indirect_fns! {
     extern "stdcall" fn bind_renderbuffer(target: Enum, renderbuffer: Uint);
     extern "stdcall" fn renderbuffer_storage(target: Enum, internalformat: Enum, width: Sizei, height: Sizei);
     extern "stdcall" fn framebuffer_renderbuffer(target: Enum, attachment: Enum, renderbuffertarget: Enum, renderbuffer: Uint);
+
+    extern "stdcall" fn compressed_tex_image2d(
+        target: Enum,
+        level: Int,
+        internalformat: Enum,
+        width: Sizei,
+        height: Sizei,
+        border: Int,
+        image_size: Sizei,
+        data: *const c_void
+    );
+
+    extern "stdcall" fn compressed_tex_image2d_arb(
+        target: Enum,
+        level: Int,
+        internalformat: Enum,
+        width: Sizei,
+        height: Sizei,
+        border: Int,
+        image_size: Sizei,
+        data: *const c_void
+    );
 }
 
 pub type Uint = c_uint;
@@ -138,6 +160,8 @@ pub fn bind_glew_fns() -> Result<(), BindError> {
     bind_renderbuffer.bind_symbol("__glewBindRenderbuffer")?;
     renderbuffer_storage.bind_symbol("__glewRenderbufferStorage")?;
     framebuffer_renderbuffer.bind_symbol("__glewFramebufferRenderbuffer")?;
+    compressed_tex_image2d.bind_symbol("__glewCompressedTexImage2D")?;
+    compressed_tex_image2d_arb.bind_symbol("__glewCompressedTexImage2DARB")?;
 
     Ok(())
 }

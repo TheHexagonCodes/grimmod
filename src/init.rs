@@ -9,7 +9,7 @@ use windows::Win32::System::SystemServices::{IMAGE_DOS_HEADER, IMAGE_DOS_SIGNATU
 
 use crate::raw::memory::{HookError, BASE_ADDRESS};
 use crate::raw::{gl, grim, process, sdl};
-use crate::renderer::video_cutouts;
+use crate::renderer::{graphics, video_cutouts};
 use crate::{debug, feature, misc};
 
 pub fn main() {
@@ -48,6 +48,23 @@ fn startup() -> Result<(), String> {
     Ok(())
 }
 
+/// Runs some graphics setup code required for GrimMod
+///
+/// Since this is executed after the window has been initialized, binding
+/// OpenGL functions dynamically using (a dynamic) GetProcessAddress will allow
+/// tools like RenderDoc to intercept the call
+fn post_graphics_startup() -> Result<(), String> {
+    gl::bind_dynamic_fns().string_err()?;
+    gl::compressed_tex_image2d_arb
+        .hook(graphics::compressed_tex_image2d)
+        .string_err()?;
+
+    video_cutouts::create_stencil_buffer();
+    misc::validate_mods();
+
+    Ok(())
+}
+
 pub fn init_features() -> Result<(), HookError> {
     feature::mods()?;
     feature::hq_assets()?;
@@ -71,20 +88,11 @@ extern "stdcall" fn application_entry() {
 /// Wraps the renderers init function to execute some code that needs
 /// to run after gfx setup is done
 pub extern "C" fn init_renderers() {
-    // since this function executes after the window has been initialized, binding
-    // OpenGL function dynamically using (a dynamic) GetProcessAddress will allow
-    // tools like RenderDoc to intercept the call
-    match gl::bind_dynamic_fns().string_err() {
-        Ok(_) => {
-            video_cutouts::create_stencil_buffer();
-            misc::validate_mods();
-        }
-        Err(err) => {
-            debug::error(format!(
-                "Loading auxiliary OpenGL functions failed: {}",
-                err
-            ));
-        }
+    if let Err(err) = post_graphics_startup() {
+        debug::error(format!(
+            "Loading auxiliary OpenGL functions failed: {}",
+            err
+        ));
     };
 
     grim::init_renderers();
@@ -106,7 +114,6 @@ unsafe fn get_application_entry_addr() -> Option<usize> {
 
     Some(entry_point_addr as usize)
 }
-
 
 fn get_executable_memory_region() -> Option<(usize, usize)> {
     let mut address: usize = *BASE_ADDRESS;

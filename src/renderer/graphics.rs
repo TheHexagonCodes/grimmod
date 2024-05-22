@@ -548,3 +548,25 @@ pub extern "stdcall" fn forced_linear_sampler_parameteri(
         gl::sampler_parameteri(target, pname, param);
     }
 }
+
+pub extern "stdcall" fn compressed_tex_image2d(
+    target: gl::Enum,
+    level: gl::Int,
+    internalformat: gl::Enum,
+    width: gl::Sizei,
+    height: gl::Sizei,
+    border: gl::Int,
+    image_size: gl::Sizei,
+    data: *const c_void,
+) {
+    gl::compressed_tex_image2d(
+        target,
+        level,
+        internalformat,
+        width,
+        height,
+        border,
+        image_size,
+        data,
+    );
+}
