@@ -2,7 +2,6 @@
 
 mod config;
 mod debug;
-mod feature;
 mod file;
 mod init;
 mod macros;
