@@ -13,6 +13,7 @@ use windows::{
         System::{
             Diagnostics::Debug::{IMAGE_DIRECTORY_ENTRY_IMPORT, IMAGE_NT_HEADERS32},
             LibraryLoader::{GetModuleHandleA, GetProcAddress},
+            Memory::{VirtualQuery, MEMORY_BASIC_INFORMATION, MEM_COMMIT, PAGE_EXECUTE_READ},
             SystemServices::{
                 IMAGE_DOS_HEADER, IMAGE_DOS_SIGNATURE, IMAGE_IMPORT_BY_NAME,
                 IMAGE_IMPORT_DESCRIPTOR, IMAGE_NT_SIGNATURE,
@@ -22,7 +23,10 @@ use windows::{
     },
 };
 
-use crate::{indirect_fns, raw::memory::BindError};
+use crate::{
+    indirect_fns,
+    raw::memory::{BindError, BASE_ADDRESS},
+};
 
 static IMPORT_MAP: Mutex<Option<HashMap<String, usize>>> = Mutex::new(None);
 
@@ -120,4 +124,45 @@ unsafe fn build_import_map() -> Option<HashMap<String, usize>> {
     }
 
     Some(imports)
+}
+
+/// Gets some basic info about a memory location
+pub fn query_memory_region(addr: usize) -> Option<MEMORY_BASIC_INFORMATION> {
+    let mut mbi: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
+    let mbi_size = std::mem::size_of::<MEMORY_BASIC_INFORMATION>();
+    let result = unsafe { VirtualQuery(Some(addr as _), &mut mbi, mbi_size) };
+    (result != 0).then_some(mbi)
+}
+
+/// Finds the first memory region after the base address that allows execution
+pub fn get_first_executable_memory_region() -> Option<(usize, usize)> {
+    let mut address: usize = *BASE_ADDRESS;
+
+    while let Some(mbi) = query_memory_region(address) {
+        if mbi.State == MEM_COMMIT && mbi.Protect.contains(PAGE_EXECUTE_READ) {
+            return Some((address, mbi.RegionSize));
+        }
+        address += mbi.RegionSize;
+    }
+
+    None
+}
+
+/// Gets the address of the main application entry function
+pub fn get_application_entry_addr() -> Option<usize> {
+    unsafe {
+        let module = GetModuleHandleA(None).ok()?;
+        let module_addr = module.0 as usize;
+
+        let dos_header: IMAGE_DOS_HEADER = (module_addr as *const IMAGE_DOS_HEADER).read();
+        (dos_header.e_magic == IMAGE_DOS_SIGNATURE).then_some(())?;
+
+        let nt_headers_ptr: *const IMAGE_NT_HEADERS32 =
+            (module_addr + dos_header.e_lfanew as usize) as _;
+        let nt_headers = nt_headers_ptr.read();
+
+        let entry_point_rva = nt_headers.OptionalHeader.AddressOfEntryPoint;
+        let entry_point_addr = module_addr + entry_point_rva as usize;
+        Some(entry_point_addr)
+    }
 }
