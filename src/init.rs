@@ -10,7 +10,7 @@ use crate::{
 };
 
 pub fn main() {
-    debug::info("GrimMod attached to GrimFandango.exe");
+    debug::info(format!("GrimMod {} attached to GrimFandango.exe", misc::VERSION));
 
     if debug::verbose() {
         debug::info(format!("Base memory address found: 0x{:x}", *BASE_ADDRESS));
