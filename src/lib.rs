@@ -24,7 +24,7 @@ pub extern "system" fn DllMain(
     if fdw_reason == DLL_PROCESS_ATTACH {
         unsafe {
             let _ = DisableThreadLibraryCalls(hinstance);
-            raw::proxy::attach();
+            raw::glu32::bind_fns().ok();
         }
         init::main();
     }

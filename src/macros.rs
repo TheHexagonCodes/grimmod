@@ -40,3 +40,20 @@ macro_rules! indirect_fns {
         })*
     };
 }
+
+#[macro_export]
+macro_rules! proxy {
+    (
+        $(
+            #[with($internal:path)]
+            extern $conv:literal fn $name:ident($($arg_name:ident : $arg_ty:ty),*) $(-> $ret_ty:ty)?;
+        )*
+    ) => {
+        $(
+            #[no_mangle]
+            pub unsafe extern "system" fn $name($($arg_name: $arg_ty),*) $(-> $ret_ty)? {
+                $internal($($arg_name),*)
+            }
+        )*
+    };
+}

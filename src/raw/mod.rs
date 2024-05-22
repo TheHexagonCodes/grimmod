@@ -1,4 +1,5 @@
 pub mod gl;
+pub mod glu32;
 pub mod grim;
 pub mod memory;
 pub mod process;
