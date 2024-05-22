@@ -12,7 +12,7 @@ use windows::Win32::UI::WindowsAndMessaging::SetProcessDPIAware;
 use crate::debug;
 use crate::raw::{grim, sdl};
 
-const VERSION: Version = Version::new(1, 0, 0);
+pub const VERSION: Version = Version::new(1, 1, 0);
 
 #[derive(serde::Deserialize)]
 pub struct ModInfo {
