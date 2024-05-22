@@ -18,15 +18,26 @@ Download at [https://hexagon.codes/grimhd](https://hexagon.codes/grimhd)
 ## Installation
 
 1. Place `glu32.dll` in the root of the Grim Fandango Remastered directory where `GrimFandango.exe` is located.
-2. (Optional) Put any mods in a `Mods` folder in the root directory.
-3. Enjoy the ride!
+4. (Optional) Put any mods in a `Mods` folder in the root directory.
+5. Enjoy the ride!
+
+Note: For GOG, when launching with the "Launch Grim Fandango Remastered" shortcut (like GOG Galaxy does), it's necessary to locate the shortcut in the game folder and set "Properties -> Compatibility -> Run this program as an administrator".
+
+Note: For the Steam Deck, first set the game to run the Windows version by using Proton in the compatibility options.
+
+## Changelog
+  ### 1.1.0
+  - Added GOG support (see installation note).
+  - Added Steam Deck support (see installation note).
+  - Improved initialization stability with better logging for errors.
+  ### 1.0.0
+  - Initial release.
 
 ## Limitations
 
 * Doesn't allow for upscaling videos, yet. This includes full cutscenes and scenes that use video as part of the background/foreground (however most animations are simply a series of images, which can be upscaled).
 * Doesn't attempt to make the game 16:9. Any non-4:3 assets will still look stretched.
 * A full playthrough with grimmod has been completed but as new software, bugs and crashes are to be expected. Save regularly (but autosave is a potential future feature!).
-* Doesn't work on Steam Deck (or on the one tested at least). Even without GrimMod, the remaster crashes under Proton. Should be fixable.
 
 ## Config
 
