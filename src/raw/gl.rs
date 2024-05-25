@@ -2,12 +2,16 @@
 
 use std::ffi::{c_int, c_uint, c_void};
 
-use crate::raw::memory::BindError;
 use crate::{direct_fns, indirect_fns};
 
 // static imports
 indirect_fns! {
+    #![bind_with(bind_static_fns)]
+
+    #[symbol(glGetError)]
     extern "stdcall" fn get_error() -> Enum;
+
+    #[symbol(glTexImage2D)]
     extern "stdcall" fn tex_image_2d(
         target: Enum,
         level: Int,
@@ -19,36 +23,74 @@ indirect_fns! {
         typ: Enum,
         data: *const c_void,
     );
+
+    #[symbol(glPixelStorei)]
     extern "stdcall" fn pixel_storei(pname: Enum, param: Int);
+
+    #[symbol(glGetIntegerv)]
     extern "stdcall" fn get_integerv(pname: Enum, params: *mut Int);
+
+    #[symbol(glDeleteTextures)]
     extern "stdcall" fn delete_textures(n: Sizei, textures: *const Uint);
+
+    #[symbol(glEnable)]
     extern "stdcall" fn enable(cap: Enum);
+
+    #[symbol(glEnable)]
     extern "stdcall" fn disable(cap: Enum);
+
+    #[symbol(glColorMask)]
     extern "stdcall" fn color_mask(red: Uint, green: Uint, blue: Uint, alpha: Uint);
+
+    #[symbol(glDepthMask)]
     extern "stdcall" fn depth_mask(flag: Uint);
+
+    #[symbol(glClear)]
     extern "stdcall" fn clear(mask: u32);
 }
 
 // dynamic imports
 direct_fns! {
+    #![bind_with(bind_dynamic_fns)]
+
+    #[symbol(glDrawArrays, "opengl32.dll")]
     extern "stdcall" fn draw_arrays(mode: Enum, first: Int, count: Sizei);
+
+    #[symbol(glStencilFunc, "opengl32.dll")]
     extern "stdcall" fn stencil_func(func: Enum, ref_value: Int, mask: Uint);
+
+    #[symbol(glStencilOp, "opengl32.dll")]
     extern "stdcall" fn stencil_op(sfail: Enum, dpfail: Enum, dppass: Enum);
+
+    #[symbol(glStencilMask, "opengl32.dll")]
     extern "stdcall" fn stencil_mask(mask: Uint);
 }
 
 // glew imports
 indirect_fns! {
+    #![bind_with(bind_glew_fns)]
+
+    #[symbol(__glewSamplerParameteri)]
     extern "stdcall" fn sampler_parameteri(sampler: Uint, pname: Enum, param: Int);
+
+    #[symbol(__glewBlendFuncSeparate)]
     extern "stdcall" fn blend_func_separate(
         src_rgb: Enum,
         dst_rgb: Enum,
         src_alpha: Enum,
         dst_alpha: Enum
     );
+
+    #[symbol(__glewBindBuffer)]
     extern "stdcall" fn bind_buffer(target: Enum, buffer: Uint);
+
+    #[symbol(__glewBufferData)]
     extern "stdcall" fn buffer_data(target: Enum, size: Sizei, data: *mut c_void, usage: Enum);
+
+    #[symbol(__glewGenBuffers)]
     extern "stdcall" fn gen_buffers(n: Sizei, buffers: *mut Uint);
+
+    #[symbol(__glewVertexAttribPointer)]
     extern "stdcall" fn vertex_attrib_pointer(
         index: Uint,
         size: Int,
@@ -57,15 +99,32 @@ indirect_fns! {
         stride: Sizei,
         pointer: *const c_void
     );
+
+    #[symbol(__glewEnableVertexAttribArray)]
     extern "stdcall" fn enable_vertex_attrib_array(index: Uint);
+
+    #[symbol(__glewDrawElementsBaseVertex)]
     extern "stdcall" fn draw_elements_base_vertex(mode: Enum, count: Sizei, typ: Enum, indicies: *mut c_void, basevertex: Int);
+
+    #[symbol(__glewGenVertexArrays)]
     extern "stdcall" fn gen_vertex_arrays(n: Sizei, arrays: *mut Uint);
+
+    #[symbol(__glewBindVertexArray)]
     extern "stdcall" fn bind_vertex_array(array: Uint);
+
+    #[symbol(__glewGenRenderbuffers)]
     extern "stdcall" fn gen_renderbuffers(n: Sizei, renderbuffers: *mut Uint);
+
+    #[symbol(__glewBindRenderbuffer)]
     extern "stdcall" fn bind_renderbuffer(target: Enum, renderbuffer: Uint);
+
+    #[symbol(__glewRenderbufferStorage)]
     extern "stdcall" fn renderbuffer_storage(target: Enum, internalformat: Enum, width: Sizei, height: Sizei);
+
+    #[symbol(__glewFramebufferRenderbuffer)]
     extern "stdcall" fn framebuffer_renderbuffer(target: Enum, attachment: Enum, renderbuffertarget: Enum, renderbuffer: Uint);
 
+    #[symbol(__glewCompressedTexImage2D)]
     extern "stdcall" fn compressed_tex_image2d(
         target: Enum,
         level: Int,
@@ -77,6 +136,7 @@ indirect_fns! {
         data: *const c_void
     );
 
+    #[symbol(__glewCompressedTexImage2DARB)]
     extern "stdcall" fn compressed_tex_image2d_arb(
         target: Enum,
         level: Int,
@@ -120,48 +180,3 @@ pub const FRAMEBUFFER: Enum = 0x8D40;
 pub const RENDERBUFFER: Enum = 0x8D41;
 pub const DEPTH24_STENCIL8: Enum = 0x88F0;
 pub const VERTEX_ARRAY_BINDING: Enum = 0x85B5;
-
-pub fn bind_static_fns() -> Result<(), BindError> {
-    get_error.bind_symbol("glGetError")?;
-    tex_image_2d.bind_symbol("glTexImage2D")?;
-    pixel_storei.bind_symbol("glPixelStorei")?;
-    get_integerv.bind_symbol("glGetIntegerv")?;
-    delete_textures.bind_symbol("glDeleteTextures")?;
-    enable.bind_symbol("glEnable")?;
-    disable.bind_symbol("glDisable")?;
-    color_mask.bind_symbol("glColorMask")?;
-    depth_mask.bind_symbol("glDepthMask")?;
-    clear.bind_symbol("glClear")?;
-
-    Ok(())
-}
-
-pub fn bind_dynamic_fns() -> Result<(), BindError> {
-    draw_arrays.bind_virtual_import("glDrawArrays", "opengl32.dll")?;
-    stencil_func.bind_virtual_import("glStencilFunc", "opengl32.dll")?;
-    stencil_op.bind_virtual_import("glStencilOp", "opengl32.dll")?;
-    stencil_mask.bind_virtual_import("glStencilMask", "opengl32.dll")?;
-
-    Ok(())
-}
-
-pub fn bind_glew_fns() -> Result<(), BindError> {
-    sampler_parameteri.bind_symbol("__glewSamplerParameteri")?;
-    blend_func_separate.bind_symbol("__glewBlendFuncSeparate")?;
-    gen_buffers.bind_symbol("__glewGenBuffers")?;
-    bind_buffer.bind_symbol("__glewBindBuffer")?;
-    buffer_data.bind_symbol("__glewBufferData")?;
-    vertex_attrib_pointer.bind_symbol("__glewVertexAttribPointer")?;
-    enable_vertex_attrib_array.bind_symbol("__glewEnableVertexAttribArray")?;
-    draw_elements_base_vertex.bind_symbol("__glewDrawElementsBaseVertex")?;
-    gen_vertex_arrays.bind_symbol("__glewGenVertexArrays")?;
-    bind_vertex_array.bind_symbol("__glewBindVertexArray")?;
-    gen_renderbuffers.bind_symbol("__glewGenRenderbuffers")?;
-    bind_renderbuffer.bind_symbol("__glewBindRenderbuffer")?;
-    renderbuffer_storage.bind_symbol("__glewRenderbufferStorage")?;
-    framebuffer_renderbuffer.bind_symbol("__glewFramebufferRenderbuffer")?;
-    compressed_tex_image2d.bind_symbol("__glewCompressedTexImage2D")?;
-    compressed_tex_image2d_arb.bind_symbol("__glewCompressedTexImage2DARB")?;
-
-    Ok(())
-}

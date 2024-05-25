@@ -4,11 +4,15 @@ use std::ffi::{c_char, c_int, c_uint, c_void, CStr};
 
 use crate::direct_fns;
 use crate::raw::gl;
-use crate::raw::memory::{BindError, Value};
+use crate::raw::memory::Value;
 
 direct_fns! {
     // The main application entry point, after DLL initialization
     extern "stdcall" fn entry();
+}
+
+direct_fns! {
+    #![bind_with(find_fns)]
 
     // Initializes the 3 renderers (software, deferred, hardware)
     #[pattern("c7 00 00 00 00 00 8b 0d ?? ?? ?? ?? c7 01 01 00 00 00 8b 15 ?? ?? ?? ?? c7", 0x14)]
@@ -123,34 +127,6 @@ direct_fns! {
     // Begins toggling between the software and remaster renderer
     #[pattern("55 8b ec 83 ec 08 56 57 8b 7d 08 33 f6 3b fe 0f 85 3c 01 00 00", 0x0)]
     extern "C" fn toggle_renderers();
-}
-
-pub fn find_fns(code_addr: usize, code_size: usize) -> Result<(), BindError> {
-    init_renderers.find(code_addr, code_size)?;
-    open_file.find(code_addr, code_size)?;
-    close_file.find(code_addr, code_size)?;
-    read_file.find(code_addr, code_size)?;
-    open_bm_image.find(code_addr, code_size)?;
-    copy_image.find(code_addr, code_size)?;
-    decompress_image.find(code_addr, code_size)?;
-    manage_resource.find(code_addr, code_size)?;
-    bind_image_surface.find(code_addr, code_size)?;
-    surface_upload.find(code_addr, code_size)?;
-    setup_draw.find(code_addr, code_size)?;
-    set_draw_shader.find(code_addr, code_size)?;
-    render_scene.find(code_addr, code_size)?;
-    draw_indexed_primitives.find(code_addr, code_size)?;
-    marker.find(code_addr, code_size)?;
-
-    init_base_buffer.find(code_addr, code_size)?;
-    init_software_buffers.find(code_addr, code_size)?;
-    init_smush_buffer.find(code_addr, code_size)?;
-    reset_intermediate_buffers.find(code_addr, code_size)?;
-    decode_smush_frame.find(code_addr, code_size)?;
-    init_shaders_and_render_passes.find(code_addr, code_size)?;
-    toggle_renderers.find(code_addr, code_size)?;
-
-    Ok(())
 }
 
 pub static mut BACK_BUFFER: Value<Image, InitSoftwareBuffers> =
