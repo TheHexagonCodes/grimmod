@@ -1,14 +1,15 @@
-use once_cell::sync::Lazy;
 use std::ffi::CString;
+use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
+use std::sync::LazyLock;
 
 use crate::config::Config;
 use crate::raw::{gl, grim};
 
 const LOG_FILENAME: &str = "grimmod.log";
 
-static LOG_FILE: Lazy<Option<File>> = Lazy::new(|| {
+static LOG_FILE: LazyLock<Option<File>> = LazyLock::new(|| {
     OpenOptions::new()
         .write(true)
         .truncate(true)
@@ -17,23 +18,37 @@ static LOG_FILE: Lazy<Option<File>> = Lazy::new(|| {
         .ok()
 });
 
-pub fn write<T: AsRef<str>>(message: T) -> Option<()> {
-    if !Config::get().logging.enabled {
-        return None;
-    }
+fn write(message: fmt::Arguments) -> Option<()> {
+    // On Linux/macOS, also print to stderr for easy debugging under LD_PRELOAD/DYLD_INSERT_LIBRARIES
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    eprintln!("[grimmod] {}", message);
 
     if let Some(mut log_file) = LOG_FILE.as_ref() {
-        writeln!(log_file, "{}", message.as_ref()).ok()?;
+        writeln!(log_file, "{}", message).ok()?;
     }
     Some(())
 }
 
 pub fn info<T: AsRef<str>>(message: T) -> Option<()> {
-    write(format!("[INFO] {}", message.as_ref()))
+    if !Config::get().logging.enabled {
+        return None;
+    }
+    write(format_args!("[INFO] {}", message.as_ref()))
+}
+
+/// Debug-level messages — only logged when `logging.debug = true` in grimmod.toml.
+pub fn debug<T: AsRef<str>>(message: T) -> Option<()> {
+    if !verbose() {
+        return None;
+    }
+    write(format_args!("[DEBUG] {}", message.as_ref()))
 }
 
 pub fn error<T: AsRef<str>>(message: T) -> Option<()> {
-    write(format!("[ERROR] {}", message.as_ref()))
+    if !Config::get().logging.enabled {
+        return None;
+    }
+    write(format_args!("[ERROR] {}", message.as_ref()))
 }
 
 #[allow(dead_code)]

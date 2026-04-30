@@ -36,25 +36,19 @@ impl StencilBuffer {
 static STENCIL_BUFFER: Mutex<StencilBuffer> = Mutex::new(StencilBuffer::new(0, 0, 0, 0, 0, 0));
 
 pub fn triangles_for(name: &str) -> Option<&'static [f32]> {
-    if name == "cb_1_intha" {
-        Some(&CB_1_TRIANGLES)
-    } else if name == "ew_0_ishla" {
-        Some(&EW_0_TRIANGLES)
-    } else if name == "hb_0_blcsk" {
-        Some(&HB_0_TRIANGLES)
-    } else if name == "lx_0_dokla" {
-        Some(&LX_0_TRIANGLES)
-    } else if name == "lx_2_extoh" {
-        Some(&LX_2_TRIANGLES)
-    } else if name == "se_0_estws" {
-        Some(&SE_0_TRIANGLES)
-    } else {
-        None
+    match name {
+        "cb_1_intha" => Some(&CB_1_TRIANGLES),
+        "ew_0_ishla" => Some(&EW_0_TRIANGLES),
+        "hb_0_blcsk" => Some(&HB_0_TRIANGLES),
+        "lx_0_dokla" => Some(&LX_0_TRIANGLES),
+        "lx_2_extoh" => Some(&LX_2_TRIANGLES),
+        "se_0_estws" => Some(&SE_0_TRIANGLES),
+        _ => None,
     }
 }
 
 pub fn bind_for(name: &str) {
-    let mut stencil_buffer = STENCIL_BUFFER.lock().unwrap();
+    let mut stencil_buffer = STENCIL_BUFFER.lock().expect("STENCIL_BUFFER lock poisoned");
     if let Some(triangles) = triangles_for(name) {
         bind_stencil_vos(&mut stencil_buffer, triangles);
     }
@@ -67,7 +61,8 @@ pub fn create_stencil_buffer() {
     gl::renderbuffer_storage(gl::RENDERBUFFER, gl::DEPTH24_STENCIL8, 640, 480);
     gl::bind_renderbuffer(gl::RENDERBUFFER, 0);
     let (vao, vbo) = create_stencil_vao();
-    *STENCIL_BUFFER.lock().unwrap() = StencilBuffer::new(stencil_buffer, 0, vao, vbo, 640, 480);
+    *STENCIL_BUFFER.lock().expect("STENCIL_BUFFER lock poisoned") =
+        StencilBuffer::new(stencil_buffer, 0, vao, vbo, 640, 480);
 }
 
 fn create_stencil_vao() -> (gl::Uint, gl::Uint) {
@@ -124,8 +119,8 @@ pub fn detach_stencil_buffer() {
     gl::framebuffer_renderbuffer(gl::FRAMEBUFFER, gl::STENCIL_ATTACHMENT, gl::RENDERBUFFER, 0);
 }
 
-pub fn with_stencil<F: Fn()>(draw: F) {
-    let mut stencil_buffer = STENCIL_BUFFER.lock().unwrap();
+pub fn with_stencil<F: FnOnce()>(draw: F) {
+    let mut stencil_buffer = STENCIL_BUFFER.lock().expect("STENCIL_BUFFER lock poisoned");
     let mut previous_vao = 0;
     let mut viewport: [gl::Int; 4] = [0; 4];
     gl::get_integerv(gl::VERTEX_ARRAY_BINDING, &mut previous_vao);
@@ -154,11 +149,7 @@ pub fn draw_stencil_mask(stencil_buffer: &StencilBuffer) {
     gl::depth_mask(0);
 
     gl::bind_vertex_array(stencil_buffer.vao);
-    gl::draw_arrays(
-        gl::TRIANGLES,
-        0,
-        stencil_buffer.n_vertices as gl::Sizei / 2 as gl::Sizei,
-    );
+    gl::draw_arrays(gl::TRIANGLES, 0, stencil_buffer.n_vertices as gl::Sizei / 2);
     gl::color_mask(1, 1, 1, 1);
     gl::depth_mask(1);
 

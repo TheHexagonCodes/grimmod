@@ -37,6 +37,10 @@ impl Decoder {
             )
         };
         if init_result != vpx_sys::VPX_CODEC_OK {
+            debug::error(format!(
+                "VP9 {:?} decoder init failed (vpx error code {:?})",
+                mode, init_result
+            ));
             return None;
         }
         Some(Decoder {
@@ -46,28 +50,59 @@ impl Decoder {
         })
     }
 
-    pub fn decode<F>(&mut self, data: &Vec<u8>, f: F) -> Option<Vec<u8>>
+    pub fn decode<F>(&mut self, data: &[u8], f: F) -> Option<Vec<u8>>
     where
         F: Fn(&vpx_sys::vpx_image_t) -> Vec<u8>,
     {
         let (data, data_size) = if let DecoderMode::Color = self.mode {
-            let block: Block = data.try_into().ok()?;
-            let data = block.raw_frame_data();
-            (data.as_ptr(), data.len())
+            let block: Block = match data.try_into() {
+                Ok(block) => block,
+                Err(_) => {
+                    debug::error(format!(
+                        "failed to parse Matroska block for {:?} stream ({} bytes)",
+                        self.mode,
+                        data.len()
+                    ));
+                    return None;
+                }
+            };
+            let frame_data = block.raw_frame_data();
+            (frame_data.as_ptr(), frame_data.len())
         } else {
-            (data.as_slice().as_ptr(), data.len())
+            (data.as_ptr(), data.len())
         };
         let decode_result = unsafe {
             vpx_sys::vpx_codec_decode(&mut self.codec, data, data_size as u32, null_mut(), 0)
         };
 
         if decode_result != vpx_sys::VPX_CODEC_OK {
+            let detail = unsafe {
+                let ptr = vpx_sys::vpx_codec_error(&mut self.codec);
+                if ptr.is_null() {
+                    "unknown".to_string()
+                } else {
+                    std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned()
+                }
+            };
+            debug::error(format!(
+                "vpx_codec_decode failed for {:?} stream (vpx error code {:?}, detail '{}', data size {})",
+                self.mode, decode_result, detail, data_size
+            ));
             return None;
         }
 
-        let image =
-            unsafe { vpx_sys::vpx_codec_get_frame(&mut self.codec, &mut self.vpx_iter).as_ref()? };
-        Some(f(image))
+        // Reset iterator before each call to vpx_codec_get_frame so we
+        // retrieve the first (and only) image produced by the decode above.
+        self.vpx_iter = null();
+        let image = unsafe { vpx_sys::vpx_codec_get_frame(&mut self.codec, &mut self.vpx_iter) };
+        if image.is_null() {
+            debug::error(format!(
+                "vpx_codec_get_frame returned null for {:?} stream",
+                self.mode
+            ));
+            return None;
+        }
+        Some(f(unsafe { &*image }))
     }
 }
 
@@ -79,6 +114,7 @@ impl Drop for Decoder {
     }
 }
 
+#[derive(Debug)]
 pub enum DecoderMode {
     Color,
     Alpha,
@@ -112,7 +148,10 @@ pub fn open<P: AsRef<Path>>(path: P, datas: Vec<HqImageAsyncData>) -> Option<(u3
         let mut datas = datas.into_iter();
         let result = decode(&path, &mut datas);
         if result.is_none() {
-            debug::error("error while decoding animation frames");
+            debug::error(format!(
+                "error while decoding animation frames for '{}'",
+                path.display()
+            ));
             datas.for_each(|mut data| data.failed());
         }
     });
@@ -121,14 +160,43 @@ pub fn open<P: AsRef<Path>>(path: P, datas: Vec<HqImageAsyncData>) -> Option<(u3
 }
 
 fn decode(path: &Path, datas: &mut impl Iterator<Item = HqImageAsyncData>) -> Option<()> {
-    let mut src = File::open(path).ok()?;
-    let mut color_decoder = Decoder::new(DecoderMode::Color)?;
-    let mut alpha_decoder = Decoder::new(DecoderMode::Alpha)?;
+    let mut src = match File::open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            debug::error(format!(
+                "failed to open animation file '{}': {}",
+                path.display(),
+                e
+            ));
+            return None;
+        }
+    };
+    let mut color_decoder = match Decoder::new(DecoderMode::Color) {
+        Some(d) => d,
+        None => {
+            debug::error(format!(
+                "failed to create color decoder for '{}'",
+                path.display()
+            ));
+            return None;
+        }
+    };
+    let mut alpha_decoder = match Decoder::new(DecoderMode::Alpha) {
+        Some(d) => d,
+        None => {
+            debug::error(format!(
+                "failed to create alpha decoder for '{}'",
+                path.display()
+            ));
+            return None;
+        }
+    };
 
     let mut block_id = 0;
     let mut has_alpha = false;
     let mut buffer = Vec::new();
     let mut alpha = Vec::new();
+    let mut frame_index: u32 = 0;
 
     for tag in WebmIterator::new(&mut src, &[]) {
         match tag {
@@ -136,24 +204,74 @@ fn decode(path: &Path, datas: &mut impl Iterator<Item = HqImageAsyncData>) -> Op
                 has_alpha = mode == 1;
             }
             Ok(MatroskaSpec::SimpleBlock(data)) => {
-                let decoded = color_decoder.decode(&data, vpx_to_rgb)?;
-                datas.next()?.loaded(decoded, has_alpha);
+                let decoded = match color_decoder.decode(&data, vpx_to_rgb) {
+                    Some(d) => d,
+                    None => {
+                        debug::error(format!(
+                            "failed to decode color SimpleBlock frame {} in '{}'",
+                            frame_index,
+                            path.display()
+                        ));
+                        return None;
+                    }
+                };
+                match datas.next() {
+                    Some(mut data_slot) => data_slot.loaded(decoded, has_alpha),
+                    None => {
+                        debug::error(format!(
+                            "ran out of image data slots at frame {} in '{}'",
+                            frame_index,
+                            path.display()
+                        ));
+                        return None;
+                    }
+                }
+                frame_index += 1;
             }
-            Ok(MatroskaSpec::Block(data)) => {
-                buffer = color_decoder.decode(&data, vpx_to_rgb)?;
-            }
+            Ok(MatroskaSpec::Block(data)) => match color_decoder.decode(&data, vpx_to_rgb) {
+                Some(d) => buffer = d,
+                None => {
+                    debug::error(format!(
+                        "failed to decode color Block frame {} in '{}'",
+                        frame_index,
+                        path.display()
+                    ));
+                    return None;
+                }
+            },
             Ok(MatroskaSpec::BlockAddID(block_add_id)) => {
                 block_id = block_add_id;
             }
             Ok(MatroskaSpec::BlockAdditional(data)) if block_id == 1 => {
-                alpha = alpha_decoder.decode(&data, vpx_to_alpha)?;
+                match alpha_decoder.decode(&data, vpx_to_alpha) {
+                    Some(d) => alpha = d,
+                    None => {
+                        debug::error(format!(
+                            "failed to decode alpha BlockAdditional frame {} in '{}'",
+                            frame_index,
+                            path.display()
+                        ));
+                        return None;
+                    }
+                }
             }
             Ok(MatroskaSpec::BlockGroup(Master::End)) => {
                 block_id = 0;
-                let mut data = datas.next()?;
-                merge_alpha(&mut buffer, &mut alpha);
+                let mut data = match datas.next() {
+                    Some(d) => d,
+                    None => {
+                        debug::error(format!(
+                            "ran out of image data slots at BlockGroup frame {} in '{}'",
+                            frame_index,
+                            path.display()
+                        ));
+                        return None;
+                    }
+                };
+                merge_alpha(&mut buffer, &alpha);
                 data.loaded(buffer, has_alpha);
                 buffer = Vec::new();
+                frame_index += 1;
             }
             _ => {}
         }
@@ -162,7 +280,7 @@ fn decode(path: &Path, datas: &mut impl Iterator<Item = HqImageAsyncData>) -> Op
     Some(())
 }
 
-fn merge_alpha(rgba: &mut [u8], alpha: &mut [u8]) {
+fn merge_alpha(rgba: &mut [u8], alpha: &[u8]) {
     if rgba.len() == alpha.len() * 4 {
         for i in 0..alpha.len() {
             rgba[i * 4 + 3] = alpha[i];

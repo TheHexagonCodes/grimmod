@@ -1,26 +1,47 @@
 use crate::{
     config::Config,
-    debug, misc,
-    raw::{
-        gl, grim,
-        memory::{HookError, BASE_ADDRESS},
-        process, sdl,
-    },
-    renderer::{graphics, video_cutouts}, file,
+    debug, file, misc, perf,
+    raw::{gl, grim, memory::HookError, sdl},
+    renderer::{graphics, video_cutouts},
 };
 
-pub fn main() {
-    debug::info(format!("GrimMod {} attached to GrimFandango.exe", misc::VERSION));
+#[cfg(target_os = "windows")]
+use crate::raw::{memory::BASE_ADDRESS, process};
 
-    if debug::verbose() {
-        debug::info(format!("Base memory address found: 0x{:x}", *BASE_ADDRESS));
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use std::ffi::{c_char, c_int};
+
+pub fn main() {
+    #[cfg(target_os = "windows")]
+    {
+        debug::info(format!(
+            "GrimMod {} attached to GrimFandango.exe",
+            misc::VERSION
+        ));
+
+        if debug::verbose() {
+            debug::info(format!("Base memory address found: 0x{:x}", *BASE_ADDRESS));
+        }
     }
+
+    #[cfg(target_os = "linux")]
+    debug::info(format!(
+        "GrimMod {} (Linux) attached via LD_PRELOAD",
+        misc::VERSION
+    ));
+
+    #[cfg(target_os = "macos")]
+    debug::info(format!(
+        "GrimMod {} (macOS) attached via DYLD_INSERT_LIBRARIES",
+        misc::VERSION
+    ));
 
     if let Err(err) = initiate_startup() {
         debug::error(format!("GrimMod startup failed: {}", err));
     }
 }
 
+#[cfg(target_os = "windows")]
 fn initiate_startup() -> Result<(), String> {
     let (code_addr, code_size) = process::get_first_executable_memory_region()
         .ok_or_else(|| "Could not locate executable memory region".to_string())?;
@@ -33,8 +54,30 @@ fn initiate_startup() -> Result<(), String> {
     grim::entry.hook(application_entry).string_err()
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn initiate_startup() -> Result<(), String> {
+    // On Linux/macOS, resolve all game functions by symbol name (no pattern scanning)
+    grim::find_fns().string_err()?;
+
+    // Resolve and hook main() for the next startup phase
+    grim::entry.bind_symbol("main").string_err()?;
+    grim::entry.hook(application_entry).string_err()
+}
+
+#[cfg(target_os = "windows")]
 fn startup() -> Result<(), String> {
     process::bind_get_proc_address().string_err()?;
+    sdl::bind_static_fns().string_err()?;
+    gl::bind_static_fns().string_err()?;
+    gl::bind_glew_fns().string_err()?;
+    init_hooks().string_err()?;
+
+    Ok(())
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn startup() -> Result<(), String> {
+    // Bind SDL and GL functions via GOT/stub entries
     sdl::bind_static_fns().string_err()?;
     gl::bind_static_fns().string_err()?;
     gl::bind_glew_fns().string_err()?;
@@ -54,23 +97,29 @@ fn post_graphics_startup() -> Result<(), String> {
         .hook(graphics::compressed_tex_image2d)
         .string_err()?;
 
+    graphics::install_persistent_gl_hooks();
+
     video_cutouts::create_stencil_buffer();
     misc::validate_mods();
 
     Ok(())
 }
 
-pub fn init_hooks() -> Result<(), HookError> {
+fn init_hooks() -> Result<(), HookError> {
+    perf::init();
     always_on_hooks()?;
     mods_hooks()?;
     hq_assets_hooks()?;
     vsync_hooks()?;
+
+    #[cfg(target_os = "windows")]
     hdpi_fix_hooks()?;
 
     Ok(())
 }
 
 /// Wraps the application entry to locate and bind now-loaded functions
+#[cfg(target_os = "windows")]
 extern "stdcall" fn application_entry() {
     match startup() {
         Ok(_) => debug::info("Successfully initiated GrimMod feature hooks"),
@@ -78,6 +127,21 @@ extern "stdcall" fn application_entry() {
     };
 
     grim::entry();
+}
+
+/// Wraps the application entry to locate and bind now-loaded functions.
+///
+/// On Linux/macOS this hooks main() instead of the Windows entry point.
+/// Must accept and forward argc/argv to the real main().
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+extern "C" fn application_entry(argc: c_int, argv: *const *const c_char) {
+    match startup() {
+        Ok(_) => debug::info("Successfully initiated GrimMod feature hooks"),
+        Err(err) => debug::error(format!("GrimMod feature hooks failed to attach: {}", err)),
+    };
+
+    // Call the original main() with its arguments
+    grim::entry(argc, argv);
 }
 
 /// Wraps the renderers init function to execute some code that needs
@@ -94,7 +158,7 @@ pub extern "C" fn init_renderers() {
 }
 
 /// Some functions need to be hooked always
-pub fn always_on_hooks() -> Result<(), HookError> {
+fn always_on_hooks() -> Result<(), HookError> {
     grim::init_renderers.hook(init_renderers)?;
     grim::render_scene.hook(graphics::render_scene as grim::RenderScene)?;
 
@@ -102,7 +166,7 @@ pub fn always_on_hooks() -> Result<(), HookError> {
 }
 
 /// Overload native IO functions to load modded files
-pub fn mods_hooks() -> Result<(), HookError> {
+fn mods_hooks() -> Result<(), HookError> {
     if !Config::get().mods {
         return Ok(());
     }
@@ -115,7 +179,7 @@ pub fn mods_hooks() -> Result<(), HookError> {
 }
 
 /// Upgrade image loading and display pipeline to enable HD 32bit assets
-pub fn hq_assets_hooks() -> Result<(), HookError> {
+fn hq_assets_hooks() -> Result<(), HookError> {
     if !Config::get().mods || !Config::get().renderer.hq_assets {
         return Ok(());
     }
@@ -138,7 +202,7 @@ pub fn hq_assets_hooks() -> Result<(), HookError> {
 }
 
 /// Force VSync to be always on
-pub fn vsync_hooks() -> Result<(), HookError> {
+fn vsync_hooks() -> Result<(), HookError> {
     if !Config::get().display.vsync {
         return Ok(());
     }
@@ -147,8 +211,10 @@ pub fn vsync_hooks() -> Result<(), HookError> {
 
     Ok(())
 }
-/// Render game at native resolution even on HDPI screens
-pub fn hdpi_fix_hooks() -> Result<(), HookError> {
+
+/// Render game at native resolution even on HDPI screens (Windows only)
+#[cfg(target_os = "windows")]
+fn hdpi_fix_hooks() -> Result<(), HookError> {
     if !Config::get().display.hdpi_fix {
         return Ok(());
     }
