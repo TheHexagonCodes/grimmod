@@ -1,2 +1,6 @@
-[build]
-target = "i686-pc-windows-msvc"
+# On Windows, default to 32-bit MSVC target.
+# On Linux, build with: cargo +nightly build --target i686-unknown-linux-gnu
+#
+# Uncomment below to default to Windows target:
+# [build]
+# target = "i686-pc-windows-msvc"

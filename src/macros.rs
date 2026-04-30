@@ -1,3 +1,8 @@
+// === Windows macros ===
+// Uses ident-based symbols, supports multiple calling conventions,
+// byte-pattern scanning, IAT binding, and DLL proxy exports.
+
+#[cfg(target_os = "windows")]
 #[macro_export]
 macro_rules! direct_fn_def {
     (
@@ -25,6 +30,7 @@ macro_rules! direct_fn_def {
     };
 }
 
+#[cfg(target_os = "windows")]
 #[macro_export]
 macro_rules! direct_fns {
     (
@@ -62,6 +68,7 @@ macro_rules! direct_fns {
     (@binder { $($name:ident),* }) => {};
 }
 
+#[cfg(target_os = "windows")]
 #[macro_export]
 macro_rules! indirect_fn_defs {
     (
@@ -79,6 +86,7 @@ macro_rules! indirect_fn_defs {
     }
 }
 
+#[cfg(target_os = "windows")]
 #[macro_export]
 macro_rules! indirect_fns {
     (
@@ -111,6 +119,7 @@ macro_rules! indirect_fns {
     }
 }
 
+#[cfg(target_os = "windows")]
 #[macro_export]
 macro_rules! proxy {
     (
@@ -126,4 +135,130 @@ macro_rules! proxy {
             }
         )*
     };
+}
+
+// === Linux macros ===
+// Uses string-literal symbols, extern "C" only,
+// symbol-name resolution via ELF symtab, GOT entry binding.
+
+#[cfg(target_os = "linux")]
+#[macro_export]
+macro_rules! direct_fn_def {
+    (
+        $(#[symbol($symbol:literal)])?
+        extern "C" fn $name:ident($($arg:ident : $arg_ty:ty),* $(,)?) $(-> $ret:ty)?;
+    ) => {
+        paste::paste! {
+            pub type [<$name:camel>] = extern "C" fn($($arg: $arg_ty),*) $(-> $ret)?;
+            pub static $name: $crate::raw::memory::BoundFn<[<$name:camel>]> =
+                $crate::raw::memory::BoundFn::direct(
+                    stringify!($name),
+                    $crate::direct_fn_def!(@symbol $($symbol)?),
+                );
+        }
+    };
+
+    (@symbol $symbol:literal) => { Some($symbol) };
+    (@symbol) => { None };
+}
+
+#[cfg(target_os = "linux")]
+#[macro_export]
+macro_rules! direct_fns {
+    // With bind_with
+    (
+        #![bind_with($binder_name:ident)]
+        $(
+            $(#[symbol($symbol:literal)])?
+            extern "C" fn $name:ident($($arg:ident : $arg_ty:ty),* $(,)?) $(-> $ret:ty)?;
+        )*
+    ) => {
+        $($crate::direct_fn_def! {
+            $(#[symbol($symbol)])?
+            extern "C" fn $name($($arg : $arg_ty),*) $(-> $ret)?;
+        })*
+
+        $crate::direct_fns!(@binder $binder_name { $($name $(symbol($symbol))?),* });
+    };
+
+    // Without bind_with
+    (
+        $(
+            $(#[symbol($symbol:literal)])?
+            extern "C" fn $name:ident($($arg:ident : $arg_ty:ty),* $(,)?) $(-> $ret:ty)?;
+        )*
+    ) => {
+        $($crate::direct_fn_def! {
+            $(#[symbol($symbol)])?
+            extern "C" fn $name($($arg : $arg_ty),*) $(-> $ret)?;
+        })*
+    };
+
+    (@binder $binder_name:ident { $($name:ident $(symbol($symbol:literal))?),* $(,)? }) => {
+        pub fn $binder_name() -> Result<(), $crate::raw::memory::BindError> {
+            $(
+                $crate::direct_fns!(@bind_one $name $($symbol)?);
+            )*
+            Ok(())
+        }
+    };
+
+    (@bind_one $name:ident $symbol:literal) => {
+        $name.bind_symbol($symbol)?;
+    };
+
+    (@bind_one $name:ident) => {
+        $name.bind_symbol(stringify!($name))?;
+    };
+}
+
+#[cfg(target_os = "linux")]
+#[macro_export]
+macro_rules! indirect_fn_defs {
+    (
+        $(
+            $(#[symbol($symbol_name:literal)])?
+            extern "C" fn $name:ident($($arg:ident : $arg_ty:ty),* $(,)?) $(-> $ret:ty)?;
+        )*
+    ) => {
+        $(paste::paste! {
+            pub type [<$name:camel>] = extern "C" fn($($arg: $arg_ty),*) $(-> $ret)?;
+
+            pub static $name: $crate::raw::memory::BoundFn<[<$name:camel>]> =
+                $crate::raw::memory::BoundFn::indirect(stringify!($name));
+        })*
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[macro_export]
+macro_rules! indirect_fns {
+    (
+        #![bind_with($binder_name:ident)]
+        $(
+            #[symbol($symbol_name:literal)]
+            extern "C" fn $name:ident($($arg:ident : $arg_ty:ty),* $(,)?) $(-> $ret:ty)?;
+        )*
+    ) => {
+        $crate::indirect_fn_defs! { $(
+            #[symbol($symbol_name)]
+            extern "C" fn $name($($arg : $arg_ty),*) $(-> $ret)?;
+        )* }
+
+        pub fn $binder_name() -> Result<(), $crate::raw::memory::BindError> {
+            $($name.bind_got_entry($symbol_name)?;)*
+            Ok(())
+        }
+    };
+
+    // Without binder
+    ($(
+        $(#[symbol($symbol_name:literal)])?
+        extern "C" fn $name:ident($($arg:ident : $arg_ty:ty),* $(,)?) $(-> $ret:ty)?;
+    )*) => {
+        $crate::indirect_fn_defs! { $(
+            $(#[symbol($symbol_name)])?
+            extern "C" fn $name($($arg : $arg_ty),*) $(-> $ret)?;
+        )* }
+    }
 }

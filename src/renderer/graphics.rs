@@ -1,16 +1,17 @@
-use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_uint, c_void, CStr};
+use std::sync::LazyLock;
 use std::sync::Mutex;
 
 use crate::config::Config;
 use crate::debug;
+use crate::perf;
 use crate::raw::{gl, grim};
 use crate::renderer::{image, video_cutouts};
 
 pub static DECOMPRESSED: Mutex<Option<ImageAddr>> = Mutex::new(None);
-pub static OVERLAYS: Lazy<Mutex<HashMap<SurfaceAddr, ImageAddr>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+pub static OVERLAYS: LazyLock<Mutex<HashMap<SurfaceAddr, ImageAddr>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 pub static SMUSH_SURFACE: Mutex<Option<SurfaceAddr>> = Mutex::new(None);
 
 #[derive(Clone, Copy, Default, Hash, Eq, PartialEq)]
@@ -41,7 +42,10 @@ impl ImageAddr {
     /// Gets the original image address before decompression
     pub fn original(&self) -> ImageAddr {
         if self.is_decompression_buffer() {
-            DECOMPRESSED.lock().unwrap().unwrap_or(*self)
+            DECOMPRESSED
+                .lock()
+                .expect("DECOMPRESSED lock poisoned")
+                .unwrap_or(*self)
         } else {
             *self
         }
@@ -59,8 +63,17 @@ impl ImageAddr {
         self.0 == unsafe { grim::CLEAN_Z_BUFFER.inner_addr() }
     }
 
+    /// Windows: BACK_BUFFER IS the image, so use .addr()
+    /// Linux: BACK_BUFFER is a pointer to the image, so use .inner_addr()
     pub fn is_back_buffer(&self) -> bool {
-        self.0 == unsafe { grim::BACK_BUFFER.addr() }
+        #[cfg(target_os = "windows")]
+        {
+            self.0 == unsafe { grim::BACK_BUFFER.addr() }
+        }
+        #[cfg(target_os = "linux")]
+        {
+            self.0 == unsafe { grim::BACK_BUFFER.inner_addr() }
+        }
     }
 
     pub fn is_smush_buffer(&self) -> bool {
@@ -96,13 +109,27 @@ impl SurfaceAddr {
 
     /// Return the address for the background render pass's surface
     pub fn bitmap_underlays() -> Option<SurfaceAddr> {
-        unsafe {
-            let render_pass = grim::BITMAP_UNDERLAYS_RENDER_PASS.inner_ref();
-            let render_pass_data =
-                render_pass.and_then(|render_pass| render_pass.entities.data().first());
-            let surface = render_pass_data.map(|render_pass_data| render_pass_data.surface);
-            surface.map(SurfaceAddr::from_ptr)
-        }
+        let t = perf::begin();
+        let result = unsafe {
+            let rp_ptr = grim::BITMAP_UNDERLAYS_RENDER_PASS.inner_addr();
+            let render_pass = grim::BITMAP_UNDERLAYS_RENDER_PASS.inner_ref()?;
+            let entities_data = render_pass.entities.data();
+            let entity = entities_data.first()?;
+            let surface_ptr = entity.surface;
+            if debug::verbose() {
+                debug::debug(format!(
+                    "bitmap_underlays: rp_ptr=0x{:x}, entities.start=0x{:x}, entities.len={}, entity_ptr=0x{:x}, surface_ptr=0x{:x}",
+                    rp_ptr,
+                    render_pass.entities.start as usize,
+                    entities_data.len(),
+                    entity as *const _ as usize,
+                    surface_ptr as usize,
+                ));
+            }
+            Some(SurfaceAddr::from_ptr(surface_ptr))
+        };
+        perf::end(t, &perf::BITMAP_UNDERLAYS);
+        result
     }
 
     pub fn is_bitmap_underlays(&self) -> bool {
@@ -139,8 +166,8 @@ impl<'a> ImageContainer<'a> {
         cstr.to_str().unwrap_or("")
     }
 
-    pub fn images(&self) -> Vec<&Image> {
-        self.images.iter().collect()
+    pub fn images(&self) -> &[Image] {
+        &self.images
     }
 
     pub fn image_addrs(&self) -> Vec<ImageAddr> {
@@ -191,18 +218,32 @@ impl Draw {
     }
 
     pub fn is_hq(&self) -> bool {
-        (self.surface.is_bitmap_underlays() && image::BACKGROUND.lock().unwrap().is_some())
-            || OVERLAYS.lock().unwrap().contains_key(&self.surface)
+        let t = perf::begin();
+        let result = (self.surface.is_bitmap_underlays()
+            && image::BACKGROUND
+                .lock()
+                .expect("BACKGROUND lock poisoned")
+                .is_some())
+            || OVERLAYS
+                .lock()
+                .expect("OVERLAYS lock poisoned")
+                .contains_key(&self.surface);
+        perf::end(t, &perf::IS_HQ);
+        result
     }
 
     pub fn is_smush(&self) -> bool {
-        Some(self.surface) == *SMUSH_SURFACE.lock().unwrap()
+        let t = perf::begin();
+        let result =
+            Some(self.surface) == *SMUSH_SURFACE.lock().expect("SMUSH_SURFACE lock poisoned");
+        perf::end(t, &perf::IS_SMUSH);
+        result
     }
 }
 
 /// Removes all HQ overlay pairs owned by dropped HQ container
 pub fn unpair_overlay_surfaces(hq_image_container: &image::HqImageContainer) {
-    let mut overlays = OVERLAYS.lock().unwrap();
+    let mut overlays = OVERLAYS.lock().expect("OVERLAYS lock poisoned");
     for hq_image in hq_image_container.images.iter() {
         overlays.retain(|_, image_addr| image_addr != &hq_image.original_addr);
     }
@@ -214,6 +255,7 @@ pub extern "C" fn open_bm_image(
     param_2: u32,
     param_3: u32,
 ) -> *mut grim::ImageContainer {
+    let t = perf::begin();
     let image_container = grim::open_bm_image(filename, param_2, param_3);
 
     if let Some(image_container) = ImageContainer::from_raw(image_container) {
@@ -223,11 +265,13 @@ pub extern "C" fn open_bm_image(
         }
     }
 
+    perf::end(t, &perf::OPEN_BM_IMAGE);
     image_container
 }
 
 /// Hooks resource management to drop HQ images with original image
 pub extern "C" fn manage_resource(resource: *mut grim::Resource) -> c_int {
+    let t = perf::begin();
     let state = unsafe { (*resource).state };
     let image_container_addr = ImageContainerAddr(unsafe { (*resource).image_container as usize });
 
@@ -238,11 +282,14 @@ pub extern "C" fn manage_resource(resource: *mut grim::Resource) -> c_int {
         }
     }
 
-    grim::manage_resource(resource)
+    let result = grim::manage_resource(resource);
+    perf::end(t, &perf::MANAGE_RESOURCE);
+    result
 }
 
 /// Hooks decompression to track an image through the system
 pub extern "C" fn decompress_image(image: *const grim::Image) {
+    let t = perf::begin();
     if debug::verbose() {
         debug::info(format!(
             "Decompressing {}",
@@ -252,9 +299,10 @@ pub extern "C" fn decompress_image(image: *const grim::Image) {
 
     // store the address of the last image decompressed
     // it will shortly be copied to the clean buffer and rendered
-    *DECOMPRESSED.lock().unwrap() = Some(ImageAddr::from_ptr(image));
+    *DECOMPRESSED.lock().expect("DECOMPRESSED lock poisoned") = Some(ImageAddr::from_ptr(image));
 
-    grim::decompress_image(image)
+    grim::decompress_image(image);
+    perf::end(t, &perf::DECOMPRESS_IMAGE);
 }
 
 fn active_smush_frame_size() -> Option<(i32, i32)> {
@@ -273,6 +321,7 @@ pub extern "C" fn copy_image(
     param_7: u32,
     param_8: u32,
 ) {
+    let t = perf::begin();
     let src_image_addr = ImageAddr::from_ptr(src_image);
     let dst_image_addr = ImageAddr::from_ptr(dst_image);
 
@@ -302,7 +351,7 @@ pub extern "C" fn copy_image(
             && active_smush_frame_size() == Some((640, 480))
             && !image::Background::is_stencilled_video_scene()
         {
-            *image::BACKGROUND.lock().unwrap() = None;
+            *image::BACKGROUND.lock().expect("BACKGROUND lock poisoned") = None;
         }
     }
 
@@ -315,7 +364,8 @@ pub extern "C" fn copy_image(
         y,
         param_7,
         param_8,
-    )
+    );
+    perf::end(t, &perf::COPY_IMAGE);
 }
 
 /// Hooks surface binding to associate surfaces with HQ overlays
@@ -325,13 +375,14 @@ pub extern "C" fn bind_image_surface(
     param_3: u32,
     param_4: u32,
 ) -> *mut grim::Surface {
+    let t = perf::begin();
     let image_addr = ImageAddr::from_ptr(image).original();
     let is_hq = image::HqImage::is_loaded(image_addr);
     let surface = grim::bind_image_surface(image, param_2, param_3, param_4);
     let surface_addr = SurfaceAddr::from_ptr(surface);
 
     if image_addr.is_smush_buffer() {
-        *SMUSH_SURFACE.lock().unwrap() = Some(surface_addr);
+        *SMUSH_SURFACE.lock().expect("SMUSH_SURFACE lock poisoned") = Some(surface_addr);
     }
 
     if is_hq {
@@ -342,24 +393,55 @@ pub extern "C" fn bind_image_surface(
                 surface_addr.0
             ));
         }
-        OVERLAYS.lock().unwrap().insert(surface_addr, image_addr);
+        OVERLAYS
+            .lock()
+            .expect("OVERLAYS lock poisoned")
+            .insert(surface_addr, image_addr);
     } else {
-        OVERLAYS.lock().unwrap().remove(&surface_addr);
+        OVERLAYS
+            .lock()
+            .expect("OVERLAYS lock poisoned")
+            .remove(&surface_addr);
     }
 
+    perf::end(t, &perf::BIND_IMAGE_SURFACE);
     surface
 }
 
 /// Hooks texture deletion to clear out any bound HQ overlays
+///
+/// Windows: stdcall calling convention (GL functions are stdcall on Windows)
+/// Linux: C calling convention
+#[cfg(target_os = "windows")]
 pub extern "stdcall" fn delete_textures(n: gl::Sizei, textures: *const gl::Uint) {
+    let t = perf::begin();
     let surface_addr = SurfaceAddr(textures as usize - 0x20);
-    OVERLAYS.lock().unwrap().remove(&surface_addr);
+    OVERLAYS
+        .lock()
+        .expect("OVERLAYS lock poisoned")
+        .remove(&surface_addr);
 
     gl::delete_textures(n, textures);
+    perf::end(t, &perf::DELETE_TEXTURES);
+}
+
+#[cfg(target_os = "linux")]
+pub extern "C" fn delete_textures(n: gl::Sizei, textures: *const gl::Uint) {
+    let t = perf::begin();
+    let surface_addr = SurfaceAddr(textures as usize - 0x20);
+    OVERLAYS
+        .lock()
+        .expect("OVERLAYS lock poisoned")
+        .remove(&surface_addr);
+
+    gl::delete_textures(n, textures);
+    perf::end(t, &perf::DELETE_TEXTURES);
 }
 
 /// Hooks draw preparation to set state for HQ images
 pub extern "C" fn setup_draw(draw: *mut grim::Draw, index_buffer: *const c_void) {
+    let t = perf::begin();
+
     let hq_draw = Draw::from_raw(draw).filter(|draw| draw.is_hq());
 
     // for hq images, use a custom shader that keeps the full resolution
@@ -391,6 +473,8 @@ pub extern "C" fn setup_draw(draw: *mut grim::Draw, index_buffer: *const c_void)
             gl::blend_func_separate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA, 1, 0);
         }
     }
+
+    perf::end(t, &perf::SETUP_DRAW);
 }
 
 /// Hooks the main draw call batch to detect a video that needs cutouts
@@ -401,18 +485,24 @@ pub extern "C" fn draw_indexed_primitives(
     param_4: u32,
     param_5: u32,
 ) {
+    let t = perf::begin();
+
     if image::Background::is_stencilled_video_scene()
-        && Draw::from_raw(draw).map_or(false, |draw| draw.is_smush())
+        && Draw::from_raw(draw).is_some_and(|draw| draw.is_smush())
     {
-        gl::draw_elements_base_vertex
+        if let Err(e) = gl::draw_elements_base_vertex
             .hook(draw_elements_base_vertex as gl::DrawElementsBaseVertex)
-            .ok();
+        {
+            debug::error(format!("Failed to hook draw_elements_base_vertex: {}", e));
+        }
     }
 
-    grim::draw_indexed_primitives(draw, param_2, param_3, param_4, param_5)
+    grim::draw_indexed_primitives(draw, param_2, param_3, param_4, param_5);
+    perf::end(t, &perf::DRAW_INDEXED_PRIMITIVES);
 }
 
-/// Hooks the the opengl draw call for videos to perform a stencil test for cutouts
+/// Hooks the opengl draw call for videos to perform a stencil test for cutouts.
+#[cfg(target_os = "windows")]
 pub extern "stdcall" fn draw_elements_base_vertex(
     mode: gl::Enum,
     count: gl::Sizei,
@@ -424,53 +514,83 @@ pub extern "stdcall" fn draw_elements_base_vertex(
         gl::draw_elements_base_vertex(mode, count, typ, indicies, basevertex);
     });
 
-    gl::draw_elements_base_vertex.unhook().ok();
+    if let Err(e) = gl::draw_elements_base_vertex.unhook() {
+        debug::error(format!("Failed to unhook draw_elements_base_vertex: {}", e));
+    }
 }
 
-/// Hooks texture uploads swap out regular assets for their HQ versions
+#[cfg(target_os = "linux")]
+pub extern "C" fn draw_elements_base_vertex(
+    mode: gl::Enum,
+    count: gl::Sizei,
+    typ: gl::Enum,
+    indicies: *mut c_void,
+    basevertex: gl::Int,
+) {
+    video_cutouts::with_stencil(|| {
+        gl::draw_elements_base_vertex(mode, count, typ, indicies, basevertex);
+    });
+
+    if let Err(e) = gl::draw_elements_base_vertex.unhook() {
+        debug::error(format!("Failed to unhook draw_elements_base_vertex: {}", e));
+    }
+}
+
+/// Hooks texture uploads swap out regular assets for their HQ versions.
 pub extern "C" fn surface_upload(surface: *mut grim::Surface, image_data: *mut c_void) {
+    let t = perf::begin();
     let surface_addr = SurfaceAddr::from_ptr(surface);
     let target = image::get_target(surface_addr);
 
     if target.is_none() {
-        return unsafe {
+        unsafe {
             // call with null to reset the buffer size as it might have been changed by a hq image
             if !image_data.is_null() && (*surface).format < 0x10 {
                 grim::surface_upload(surface, std::ptr::null_mut());
             }
             grim::surface_upload(surface, image_data);
-        };
-    }
-
-    if image_data.is_null() {
+        }
+        perf::end(t, &perf::SURFACE_UPLOAD);
         return;
     }
 
-    *image::TARGET.lock().unwrap() = target;
-    gl::tex_image_2d
-        .hook(hq_tex_image_2d as gl::TexImage2d)
-        .ok();
-    gl::pixel_storei
-        .hook(hq_pixel_storei as gl::PixelStorei)
-        .ok();
+    if image_data.is_null() {
+        perf::end(t, &perf::SURFACE_UPLOAD);
+        return;
+    }
+
+    *image::TARGET.lock().expect("TARGET lock poisoned") = target;
+    if let Err(e) = gl::tex_image_2d.hook(hq_tex_image_2d as gl::TexImage2d) {
+        debug::error(format!("Failed to hook tex_image_2d: {}", e));
+    }
+    if let Err(e) = gl::pixel_storei.hook(hq_pixel_storei as gl::PixelStorei) {
+        debug::error(format!("Failed to hook pixel_storei: {}", e));
+    }
 
     grim::surface_upload(surface, std::ptr::null_mut());
 
-    gl::pixel_storei.unhook().ok();
-    gl::tex_image_2d.unhook().ok();
-    *image::TARGET.lock().unwrap() = None;
+    if let Err(e) = gl::pixel_storei.unhook() {
+        debug::error(format!("Failed to unhook pixel_storei: {}", e));
+    }
+    if let Err(e) = gl::tex_image_2d.unhook() {
+        debug::error(format!("Failed to unhook tex_image_2d: {}", e));
+    }
+    *image::TARGET.lock().expect("TARGET lock poisoned") = None;
+    perf::end(t, &perf::SURFACE_UPLOAD);
 }
 
+/// Sub-hook for glTexImage2D — replaces texture data with HQ version.
+#[cfg(target_os = "windows")]
 extern "stdcall" fn hq_tex_image_2d(
-    _target: gl::Enum,
-    _level: gl::Int,
-    _internalformat: gl::Int,
-    _width: gl::Sizei,
-    _height: gl::Sizei,
-    _border: gl::Int,
-    _format: gl::Enum,
-    _typ: gl::Enum,
-    _data: *const c_void,
+    target: gl::Enum,
+    level: gl::Int,
+    internalformat: gl::Int,
+    width: gl::Sizei,
+    height: gl::Sizei,
+    border: gl::Int,
+    format: gl::Enum,
+    typ: gl::Enum,
+    data: *const c_void,
 ) {
     fn tex_image_2d(width: u32, height: u32, ptr: *const u8) {
         gl::tex_image_2d(
@@ -485,24 +605,101 @@ extern "stdcall" fn hq_tex_image_2d(
             ptr as *const _,
         )
     }
-    image::with_target_hq_image(|target_ref| match target_ref {
-        image::TargetMut::Background(background) => tex_image_2d(
-            background.width,
-            background.height,
-            background.buffer.as_ptr(),
-        ),
+    let handled = image::with_target_hq_image(|target_ref| match target_ref {
+        image::TargetMut::Background(background) => {
+            tex_image_2d(
+                background.width,
+                background.height,
+                background.buffer.as_ptr(),
+            );
+            true
+        }
         image::TargetMut::Image(hq_image) => {
             let width = hq_image.width;
             let height = hq_image.height;
             hq_image
                 .data
-                .get_or_wait(|buffer, _| tex_image_2d(width, height, buffer.as_ptr()));
+                .get_or_wait(|buffer, _| tex_image_2d(width, height, buffer.as_ptr()))
+                .is_some()
         }
-    })
+    });
+    if !handled {
+        gl::tex_image_2d(
+            target,
+            level,
+            internalformat,
+            width,
+            height,
+            border,
+            format,
+            typ,
+            data,
+        );
+    }
 }
 
+#[cfg(target_os = "linux")]
+extern "C" fn hq_tex_image_2d(
+    target: gl::Enum,
+    level: gl::Int,
+    internalformat: gl::Int,
+    width: gl::Sizei,
+    height: gl::Sizei,
+    border: gl::Int,
+    format: gl::Enum,
+    typ: gl::Enum,
+    data: *const c_void,
+) {
+    fn tex_image_2d(width: u32, height: u32, ptr: *const u8) {
+        gl::tex_image_2d(
+            gl::TEXTURE_2D,
+            0,
+            gl::RGBA8 as gl::Int,
+            width as gl::Int,
+            height as gl::Int,
+            0,
+            gl::RGBA,
+            gl::UNSIGNED_BYTE,
+            ptr as *const _,
+        );
+    }
+    let handled = image::with_target_hq_image(|target_ref| match target_ref {
+        image::TargetMut::Background(background) => {
+            tex_image_2d(
+                background.width,
+                background.height,
+                background.buffer.as_ptr(),
+            );
+            true
+        }
+        image::TargetMut::Image(hq_image) => {
+            let width = hq_image.width;
+            let height = hq_image.height;
+            hq_image
+                .data
+                .get_or_wait(|buffer, _| tex_image_2d(width, height, buffer.as_ptr()))
+                .is_some()
+        }
+    });
+    if !handled {
+        gl::tex_image_2d(
+            target,
+            level,
+            internalformat,
+            width,
+            height,
+            border,
+            format,
+            typ,
+            data,
+        );
+    }
+}
+
+/// Sub-hook for glPixelStorei — adjusts row length for HQ image width.
+#[cfg(target_os = "windows")]
 extern "stdcall" fn hq_pixel_storei(pname: gl::Enum, param: gl::Int) {
-    image::with_target_hq_image(|target_ref| {
+    let handled = image::with_target_hq_image(|target_ref| {
         if pname == gl::UNPACK_ROW_LENGTH {
             let width = match target_ref {
                 image::TargetMut::Background(background) => background.width,
@@ -512,31 +709,64 @@ extern "stdcall" fn hq_pixel_storei(pname: gl::Enum, param: gl::Int) {
         } else {
             gl::pixel_storei(pname, param);
         }
-    })
+        true
+    });
+    if !handled {
+        gl::pixel_storei(pname, param);
+    }
+}
+
+#[cfg(target_os = "linux")]
+extern "C" fn hq_pixel_storei(pname: gl::Enum, param: gl::Int) {
+    let handled = image::with_target_hq_image(|target_ref| {
+        if pname == gl::UNPACK_ROW_LENGTH {
+            let width = match target_ref {
+                image::TargetMut::Background(background) => background.width,
+                image::TargetMut::Image(hq_image) => hq_image.width,
+            };
+            gl::pixel_storei(gl::UNPACK_ROW_LENGTH, width as gl::Int);
+        } else {
+            gl::pixel_storei(pname, param);
+        }
+        true
+    });
+    if !handled {
+        gl::pixel_storei(pname, param);
+    }
 }
 
 /// Wraps final scene draw to make the renderer toggle instant and
-/// to make the image smooth on lower res displays
+/// to make the image smooth on lower res displays.
 pub extern "C" fn render_scene(
     draw: *const grim::Draw,
     surface: *const grim::Surface,
     transition: f32,
 ) {
-    unsafe {
-        let value = if transition == 1.0 && Config::get().renderer.quick_toggle {
-            1.0
-        } else {
-            grim::RENDERING_MODE.get()
-        };
+    let t = perf::begin();
 
-        gl::sampler_parameteri
-            .hook(forced_linear_sampler_parameteri)
-            .ok();
-        grim::render_scene(draw, surface, value);
-        gl::sampler_parameteri.unhook().ok();
+    let value = if transition == 1.0 && Config::get().renderer.quick_toggle {
+        1.0
+    } else {
+        unsafe { grim::RENDERING_MODE.get() }
+    };
+
+    if let Err(e) = gl::sampler_parameteri.hook(forced_linear_sampler_parameteri) {
+        debug::error(format!("Failed to hook sampler_parameteri: {}", e));
+    }
+    grim::render_scene(draw, surface, value);
+    if let Err(e) = gl::sampler_parameteri.unhook() {
+        debug::error(format!("Failed to unhook sampler_parameteri: {}", e));
+    }
+
+    if let Some(start) = t {
+        let elapsed = start.elapsed().as_nanos() as u64;
+        perf::RENDER_SCENE.record(elapsed);
+        perf::frame_tick(elapsed);
     }
 }
 
+/// Sub-hook for glSamplerParameteri — forces LINEAR filtering.
+#[cfg(target_os = "windows")]
 pub extern "stdcall" fn forced_linear_sampler_parameteri(
     target: gl::Enum,
     pname: gl::Enum,
@@ -549,6 +779,21 @@ pub extern "stdcall" fn forced_linear_sampler_parameteri(
     }
 }
 
+#[cfg(target_os = "linux")]
+pub extern "C" fn forced_linear_sampler_parameteri(
+    target: gl::Enum,
+    pname: gl::Enum,
+    param: gl::Int,
+) {
+    if pname == gl::TEXTURE_MIN_FILTER || pname == gl::TEXTURE_MAG_FILTER {
+        gl::sampler_parameteri(target, pname, gl::LINEAR as gl::Int);
+    } else {
+        gl::sampler_parameteri(target, pname, param);
+    }
+}
+
+/// Hooks compressed texture uploads — passes through to the ARB version.
+#[cfg(target_os = "windows")]
 pub extern "stdcall" fn compressed_tex_image2d(
     target: gl::Enum,
     level: gl::Int,
@@ -559,6 +804,7 @@ pub extern "stdcall" fn compressed_tex_image2d(
     image_size: gl::Sizei,
     data: *const c_void,
 ) {
+    let t = perf::begin();
     gl::compressed_tex_image2d(
         target,
         level,
@@ -569,4 +815,30 @@ pub extern "stdcall" fn compressed_tex_image2d(
         image_size,
         data,
     );
+    perf::end(t, &perf::COMPRESSED_TEX_IMAGE);
+}
+
+#[cfg(target_os = "linux")]
+pub extern "C" fn compressed_tex_image2d(
+    target: gl::Enum,
+    level: gl::Int,
+    internalformat: gl::Enum,
+    width: gl::Sizei,
+    height: gl::Sizei,
+    border: gl::Int,
+    image_size: gl::Sizei,
+    data: *const c_void,
+) {
+    let t = perf::begin();
+    gl::compressed_tex_image2d(
+        target,
+        level,
+        internalformat,
+        width,
+        height,
+        border,
+        image_size,
+        data,
+    );
+    perf::end(t, &perf::COMPRESSED_TEX_IMAGE);
 }

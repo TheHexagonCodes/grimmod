@@ -1,8 +1,13 @@
-use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::LazyLock;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
+
+#[cfg(target_os = "linux")]
+use std::fs::File;
+#[cfg(target_os = "linux")]
+use std::io::BufReader;
 
 use crate::config::Config;
 use crate::renderer::graphics::{
@@ -12,11 +17,95 @@ use crate::renderer::{animation, video_cutouts};
 use crate::{debug, file};
 
 pub static BACKGROUND: Mutex<Option<Background>> = Mutex::new(None);
-pub static BACKGROUND_WRITES: Lazy<Mutex<BackgroundWrites>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+pub static BACKGROUND_WRITES: LazyLock<Mutex<BackgroundWrites>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 pub static TARGET: Mutex<Option<Target>> = Mutex::new(None);
 
-pub static HQ_IMAGES: Lazy<Mutex<Vec<HqImageContainer>>> = Lazy::new(|| Mutex::new(Vec::new()));
+pub static HQ_IMAGES: LazyLock<Mutex<Vec<HqImageContainer>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
+
+/// Opens a PNG file with lenient CRC/checksum handling.
+/// The GrimHD mod PNG files have invalid IDAT CRC checksums, so we must
+/// use the `png` crate directly with `ignore_checksums(true)`.
+#[cfg(target_os = "linux")]
+fn open_png_lenient(path: &Path) -> Result<(Vec<u8>, u32, u32, bool), String> {
+    let file = File::open(path).map_err(|e| format!("open: {}", e))?;
+    let mut decoder = png::Decoder::new(BufReader::new(file));
+    decoder.ignore_checksums(true);
+    let mut reader = decoder
+        .read_info()
+        .map_err(|e| format!("read_info: {}", e))?;
+    let mut buf = vec![
+        0u8;
+        reader
+            .output_buffer_size()
+            .ok_or_else(|| "output buffer size overflow".to_string())?
+    ];
+    let info = reader
+        .next_frame(&mut buf)
+        .map_err(|e| format!("next_frame: {}", e))?;
+    buf.truncate(info.buffer_size());
+
+    let width = info.width;
+    let height = info.height;
+    let has_alpha = matches!(
+        info.color_type,
+        png::ColorType::Rgba | png::ColorType::GrayscaleAlpha
+    );
+
+    // Convert to RGBA8 if needed
+    let rgba_buf = match info.color_type {
+        png::ColorType::Rgba => buf,
+        png::ColorType::Rgb => {
+            let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+            for chunk in buf.chunks(3) {
+                rgba.push(chunk[0]);
+                rgba.push(chunk[1]);
+                rgba.push(chunk[2]);
+                rgba.push(255);
+            }
+            rgba
+        }
+        png::ColorType::GrayscaleAlpha => {
+            let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+            for chunk in buf.chunks(2) {
+                rgba.push(chunk[0]);
+                rgba.push(chunk[0]);
+                rgba.push(chunk[0]);
+                rgba.push(chunk[1]);
+            }
+            rgba
+        }
+        png::ColorType::Grayscale => {
+            let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+            for &byte in &buf {
+                rgba.push(byte);
+                rgba.push(byte);
+                rgba.push(byte);
+                rgba.push(255);
+            }
+            rgba
+        }
+        png::ColorType::Indexed => {
+            return Err("indexed color PNG not supported".to_string());
+        }
+    };
+
+    Ok((rgba_buf, width, height, has_alpha))
+}
+
+/// Gets image dimensions using the png crate with lenient CRC handling.
+#[cfg(target_os = "linux")]
+fn png_dimensions(path: &Path) -> Result<(u32, u32), String> {
+    let file = File::open(path).map_err(|e| format!("open: {}", e))?;
+    let mut decoder = png::Decoder::new(BufReader::new(file));
+    decoder.ignore_checksums(true);
+    let reader = decoder
+        .read_info()
+        .map_err(|e| format!("read_info: {}", e))?;
+    let info = reader.info();
+    Ok((info.width, info.height))
+}
 
 #[derive(Debug)]
 pub enum Target {
@@ -53,8 +142,8 @@ impl HqImageContainer {
         }
         let name = Path::new(&filename).file_stem()?.to_str()?;
         let images = image_container.images();
-        let hq_images = HqImage::open_image(name, &images)
-            .or_else(|| HqImage::open_animation(name, &images))?;
+        let hq_images =
+            HqImage::open_image(name, images).or_else(|| HqImage::open_animation(name, images))?;
 
         if debug::verbose() {
             let addrs: Vec<_> = hq_images.iter().map(HqImage::format_addr).collect();
@@ -70,7 +159,7 @@ impl HqImageContainer {
 
     pub fn load(image_container: &ImageContainer) -> Option<HqImageContainer> {
         let hq_image_container = HqImageContainer::open(image_container)?;
-        let mut hq_image_containers = HQ_IMAGES.lock().unwrap();
+        let mut hq_image_containers = HQ_IMAGES.lock().expect("HQ_IMAGES lock poisoned");
         let image_addrs = image_container.image_addrs();
         let existing_index = hq_image_containers.iter().position(|hq_image_container| {
             hq_image_container
@@ -85,7 +174,7 @@ impl HqImageContainer {
     }
 
     pub fn unload(image_container_addr: ImageContainerAddr) -> Option<HqImageContainer> {
-        let mut hq_image_containers = HQ_IMAGES.lock().unwrap();
+        let mut hq_image_containers = HQ_IMAGES.lock().expect("HQ_IMAGES lock poisoned");
         let index = hq_image_containers.iter().position(|hq_image_container| {
             hq_image_container.original_addr == image_container_addr
         });
@@ -94,7 +183,8 @@ impl HqImageContainer {
 }
 
 impl HqImage {
-    fn open_image(name: &str, images: &[&Image]) -> Option<Vec<HqImage>> {
+    #[cfg(target_os = "windows")]
+    fn open_image(name: &str, images: &[Image]) -> Option<Vec<HqImage>> {
         let path = file::find_modded(&format!("{}.png", name))?;
         if images.len() != 1 {
             debug::error(format!(
@@ -129,7 +219,60 @@ impl HqImage {
         }])
     }
 
-    fn open_animation(name: &str, images: &[&Image]) -> Option<Vec<HqImage>> {
+    #[cfg(target_os = "linux")]
+    fn open_image(name: &str, images: &[Image]) -> Option<Vec<HqImage>> {
+        let path = file::find_modded(&format!("{}.png", name))?;
+        if images.len() != 1 {
+            debug::error(format!(
+                "tried to open {} as image, should be animation",
+                name
+            ));
+            return None;
+        }
+        let image = images.first()?;
+        let (width, height) = png_dimensions(&path).ok()?;
+        let data = HqImageAsyncData::new();
+
+        let mut data_clone = data.clone();
+        let name_for_thread = name.to_string();
+        let path_for_thread = path.clone();
+        thread::spawn(move || match open_png_lenient(&path_for_thread) {
+            Ok((buffer, w, h, has_alpha)) => {
+                if debug::verbose() {
+                    debug::info(format!(
+                        "PNG loaded: '{}', {}x{}, buffer_len={}, has_alpha={}",
+                        name_for_thread,
+                        w,
+                        h,
+                        buffer.len(),
+                        has_alpha
+                    ));
+                }
+                data_clone.loaded(buffer, has_alpha);
+            }
+            Err(e) => {
+                debug::error(format!(
+                    "Failed to load PNG '{}' from '{}': {}",
+                    name_for_thread,
+                    path_for_thread.display(),
+                    e
+                ));
+                data_clone.failed();
+            }
+        });
+
+        Some(vec![HqImage {
+            name: name.to_string(),
+            index: 0,
+            width,
+            height,
+            scale: width / image.width as u32,
+            original_addr: image.addr,
+            data,
+        }])
+    }
+
+    fn open_animation(name: &str, images: &[Image]) -> Option<Vec<HqImage>> {
         let path = file::find_modded(&format!("{}.mkv", name))?;
         let datas: Vec<_> = (0..images.len()).map(|_| HqImageAsyncData::new()).collect();
         let (width, height) = animation::open(path, datas.clone())?;
@@ -153,13 +296,15 @@ impl HqImage {
     }
 
     pub fn name(image_addr: ImageAddr) -> Option<String> {
-        HqImage::map_loaded(image_addr, &mut HQ_IMAGES.lock().unwrap(), |hq_image| {
-            Some(hq_image.name.clone())
-        })
+        HqImage::map_loaded(
+            image_addr,
+            &mut HQ_IMAGES.lock().expect("HQ_IMAGES lock poisoned"),
+            |hq_image| Some(hq_image.name.clone()),
+        )
     }
 
     pub fn is_loaded(addr: ImageAddr) -> bool {
-        let mut hq_images = HQ_IMAGES.lock().unwrap();
+        let mut hq_images = HQ_IMAGES.lock().expect("HQ_IMAGES lock poisoned");
         hq_images.iter_mut().any(|hq_image_container| {
             hq_image_container
                 .images
@@ -245,12 +390,13 @@ impl HqImageAsyncData {
     }
 
     pub fn loaded(&mut self, buffer: Vec<u8>, has_alpha: bool) {
-        *self.raw.0.lock().unwrap() = HqImageState::Loaded { buffer, has_alpha };
+        *self.raw.0.lock().expect("HqImageAsyncData lock poisoned") =
+            HqImageState::Loaded { buffer, has_alpha };
         self.raw.1.notify_all();
     }
 
     pub fn failed(&mut self) {
-        *self.raw.0.lock().unwrap() = HqImageState::Failed;
+        *self.raw.0.lock().expect("HqImageAsyncData lock poisoned") = HqImageState::Failed;
         self.raw.1.notify_all();
     }
 
@@ -258,9 +404,13 @@ impl HqImageAsyncData {
     where
         F: FnMut(&[u8], bool) -> R,
     {
-        let mut state = self.raw.0.lock().unwrap();
+        let mut state = self.raw.0.lock().expect("HqImageAsyncData lock poisoned");
         while matches!(*state, HqImageState::Loading) {
-            state = self.raw.1.wait(state).unwrap();
+            state = self
+                .raw
+                .1
+                .wait(state)
+                .expect("HqImageAsyncData lock poisoned");
         }
 
         match &*state {
@@ -289,11 +439,14 @@ impl Background {
                 let name = HqImage::name(image.addr).unwrap_or_default();
                 debug::info(format!("Setting {} as background", name));
             }
-            Background::set_from_image(image.addr, &mut HQ_IMAGES.lock().unwrap());
+            Background::set_from_image(
+                image.addr,
+                &mut HQ_IMAGES.lock().expect("HQ_IMAGES lock poisoned"),
+            );
         } else {
             HqImage::with_loaded_or_else(
                 image.addr,
-                &mut HQ_IMAGES.lock().unwrap(),
+                &mut HQ_IMAGES.lock().expect("HQ_IMAGES lock poisoned"),
                 |overlay| Background::animate(x, y, overlay),
                 |hq_images| {
                     Background::restore(x, y, hq_images);
@@ -303,7 +456,7 @@ impl Background {
     }
 
     fn animate(x: u32, y: u32, overlay: &mut HqImage) {
-        let mut background = BACKGROUND.lock().unwrap();
+        let mut background = BACKGROUND.lock().expect("BACKGROUND lock poisoned");
         if let Some(background) = background.as_mut() {
             // before writing the first frame of an animation, save a snapshot of the bg
             // this will be restored as the background once the animation ends
@@ -315,15 +468,21 @@ impl Background {
     }
 
     fn set_from_image(image_addr: ImageAddr, hq_images: &mut MutexGuard<Vec<HqImageContainer>>) {
-        *BACKGROUND.lock().unwrap() =
-            HqImage::map_loaded(image_addr, hq_images, HqImage::to_background_mut);
-        *BACKGROUND_WRITES.lock().unwrap() = HashMap::new();
+        let bg = HqImage::map_loaded(image_addr, hq_images, HqImage::to_background_mut);
+        *BACKGROUND.lock().expect("BACKGROUND lock poisoned") = bg;
+        BACKGROUND_WRITES
+            .lock()
+            .expect("BACKGROUND_WRITES lock poisoned")
+            .clear();
     }
 
     fn restore(x: u32, y: u32, hq_images: &mut MutexGuard<Vec<HqImageContainer>>) -> Option<()> {
-        let mut background_guard = BACKGROUND.lock().unwrap();
+        let mut background_guard = BACKGROUND.lock().expect("BACKGROUND lock poisoned");
         let background = background_guard.as_mut()?;
-        let (width, height) = BACKGROUND_WRITES.lock().unwrap().remove(&(x, y))?;
+        let (width, height) = BACKGROUND_WRITES
+            .lock()
+            .expect("BACKGROUND_WRITES lock poisoned")
+            .remove(&(x, y))?;
 
         HqImage::map_loaded(background.original_addr, hq_images, |hq_background| {
             background.copy_from(hq_background, x, y, width, height);
@@ -332,8 +491,13 @@ impl Background {
     }
 
     pub fn is_stencilled_video_scene() -> bool {
-        if Config::get().renderer.video_cutouts
-            && let Some(background) = BACKGROUND.lock().unwrap().as_ref()
+        if !Config::get().renderer.video_cutouts {
+            return false;
+        }
+        if let Some(background) = BACKGROUND
+            .lock()
+            .expect("BACKGROUND lock poisoned")
+            .as_ref()
         {
             video_cutouts::triangles_for(&background.name).is_some()
         } else {
@@ -448,19 +612,23 @@ pub fn get_target(surface_addr: SurfaceAddr) -> Option<Target> {
     }
 }
 
-pub fn with_target_hq_image<F: FnMut(TargetMut)>(mut f: F) {
-    let mut background = BACKGROUND.lock().unwrap();
-    let mut hq_images = HQ_IMAGES.lock().unwrap();
-    match TARGET.lock().unwrap().as_mut() {
-        Some(Target::Background) if let Some(background) = background.as_mut() => {
-            f(TargetMut::Background(background))
+pub fn with_target_hq_image<F: FnMut(TargetMut) -> bool>(mut f: F) -> bool {
+    let mut background = BACKGROUND.lock().expect("BACKGROUND lock poisoned");
+    let mut hq_images = HQ_IMAGES.lock().expect("HQ_IMAGES lock poisoned");
+    match TARGET.lock().expect("TARGET lock poisoned").as_mut() {
+        Some(Target::Background) => {
+            if let Some(background) = background.as_mut() {
+                f(TargetMut::Background(background))
+            } else {
+                false
+            }
         }
         Some(Target::Image(image_addr)) => HqImage::with_loaded_or_else(
             *image_addr,
             &mut hq_images,
             |hq_image| f(TargetMut::Image(hq_image)),
-            |_| {},
+            |_| false,
         ),
-        _ => {}
+        _ => false,
     }
 }

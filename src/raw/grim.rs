@@ -6,11 +6,24 @@ use crate::direct_fns;
 use crate::raw::gl;
 use crate::raw::memory::Value;
 
+// ---- Application entry ----
+
+#[cfg(target_os = "windows")]
 direct_fns! {
     // The main application entry point, after DLL initialization
     extern "stdcall" fn entry();
 }
 
+#[cfg(target_os = "linux")]
+direct_fns! {
+    // The main application entry point
+    #[symbol("main")]
+    extern "C" fn entry(argc: c_int, argv: *const *const c_char);
+}
+
+// ---- Game functions ----
+
+#[cfg(target_os = "windows")]
 direct_fns! {
     #![bind_with(find_fns)]
 
@@ -129,33 +142,174 @@ direct_fns! {
     extern "C" fn toggle_renderers();
 }
 
+#[cfg(target_os = "linux")]
+direct_fns! {
+    #![bind_with(find_fns)]
+
+    #[symbol("zg_Render_Initialize")]
+    extern "C" fn init_renderers();
+
+    #[symbol("stdFileOpen")]
+    extern "C" fn open_file(filename: *mut c_char, mode: *mut c_char) -> *mut c_void;
+    #[symbol("stdFileClose")]
+    extern "C" fn close_file(file: *mut c_void) -> c_int;
+    #[symbol("stdFileRead")]
+    extern "C" fn read_file(file: *mut c_void, dst: *mut c_void, size: usize) -> usize;
+
+    #[symbol("stdBitmap_Load")]
+    extern "C" fn open_bm_image(
+        filename: *const c_char,
+        param_2: u32,
+        param_3: u32,
+    ) -> *mut ImageContainer;
+
+    #[symbol("zg_Render_BufferCopyImpl")]
+    extern "C" fn copy_image(
+        dst_image: *mut Image,
+        dst_surface: *mut Surface,
+        src_image: *mut Image,
+        src_surface: *mut Surface,
+        x: u32,
+        y: u32,
+        param_7: u32,
+        param_8: u32,
+    );
+
+    #[symbol("sputRender_Decompress")]
+    extern "C" fn decompress_image(image: *const Image);
+
+    #[symbol("sputResource_BackgroundHandler")]
+    extern "C" fn manage_resource(resource: *mut Resource) -> c_int;
+
+    #[symbol("zg_RendererDeferred_GetCachedTextureFromColorVBuffer")]
+    extern "C" fn bind_image_surface(
+        image: *mut Image,
+        param_2: u32,
+        param_3: u32,
+        param_4: u32
+    ) -> *mut Surface;
+
+    #[symbol("zg_Surface_Upload")]
+    extern "C" fn surface_upload(surface: *mut Surface, image_data: *mut c_void);
+
+    #[symbol("zg_RenderContext_DrawSetup")]
+    extern "C" fn setup_draw(draw: *mut Draw, index_buffer: *const c_void);
+
+    #[symbol("zg_Shader_Apply")]
+    extern "C" fn set_draw_shader(draw: *mut Draw, shader: *mut Shader);
+
+    #[symbol("zg_Surface_Present")]
+    extern "C" fn render_scene(
+        draw: *const Draw,
+        surface: *const Surface,
+        transition: f32
+    );
+
+    #[symbol("zg_RenderContext_DrawIndexedPrimitives")]
+    extern "C" fn draw_indexed_primitives(
+        draw: *mut Draw,
+        param_2: u32,
+        param_3: u32,
+        param_4: u32,
+        param_5: u32
+    );
+
+    #[symbol("zg_RenderContext_PushMarker")]
+    extern "C" fn marker(len: usize, message: *const c_char);
+
+    #[symbol("allocateDefaultBuffers")]
+    extern "C" fn init_base_buffer() -> c_uint;
+
+    #[symbol("zg_RendererSoftware_SetBuffers")]
+    extern "C" fn init_software_buffers();
+
+    #[symbol("sputSmush_Initialize")]
+    extern "C" fn init_smush_buffer();
+
+    #[symbol("sputRender_Close")]
+    extern "C" fn reset_intermediate_buffers();
+
+    #[symbol("SmushPlay_UpdateMovie")]
+    extern "C" fn decode_smush_frame();
+
+    #[symbol("loadRenderResources")]
+    extern "C" fn init_shaders_and_render_passes();
+
+    #[symbol("sputRender_ControlHandler")]
+    extern "C" fn toggle_renderers();
+}
+
+// ---- Static game values ----
+
+#[cfg(target_os = "windows")]
 pub static mut BACK_BUFFER: Value<Image, InitSoftwareBuffers> =
     Value::new("BACK_BUFFER", &init_software_buffers, 0xD1);
+#[cfg(target_os = "windows")]
 pub static mut SMUSH_BUFFER: Value<*const Image, InitSmushBuffer> =
     Value::new("SMUSH_BUFFER", &init_smush_buffer, 0x14);
+#[cfg(target_os = "windows")]
 pub static mut DECOMPRESSION_BUFFER: Value<*const Image, ResetIntermediateBuffers> =
     Value::new("DECOMPRESSION_BUFFER", &reset_intermediate_buffers, 0x4C);
+#[cfg(target_os = "windows")]
 pub static mut CLEAN_BUFFER: Value<*const Image, ResetIntermediateBuffers> =
     Value::new("CLEAN_BUFFER", &reset_intermediate_buffers, 0x1C);
+#[cfg(target_os = "windows")]
 pub static mut CLEAN_Z_BUFFER: Value<*const Image, ResetIntermediateBuffers> =
     Value::new("CLEAN_Z_BUFFER", &reset_intermediate_buffers, 0x34);
+#[cfg(target_os = "windows")]
 pub static mut ACTIVE_SMUSH_FRAME: Value<*const SmushFrame, DecodeSmushFrame> =
     Value::new("ACTIVE_SMUSH_FRAME", &decode_smush_frame, 0x7C);
+#[cfg(target_os = "windows")]
 pub static mut BITMAP_UNDERLAYS_RENDER_PASS: Value<*const RenderPass, InitShadersAndRenderPasses> =
     Value::new(
         "BITMAP_UNDERLAYS_RENDER_PASS",
         &init_shaders_and_render_passes,
         0x30C,
     );
+#[cfg(target_os = "windows")]
 pub static mut TEXTURED_QUAD_SHADER: Value<*const Shader, InitShadersAndRenderPasses> = Value::new(
     "TEXTURED_QUAD_SHADER",
     &init_shaders_and_render_passes,
     0x1F,
 );
+#[cfg(target_os = "windows")]
 pub static mut GAME_WINDOW: Value<*const c_void, InitBaseBuffer> =
     Value::new("GAME_WINDOW", &init_base_buffer, 0x5);
+#[cfg(target_os = "windows")]
 pub static mut RENDERING_MODE: Value<f32, ToggleRenderers> =
     Value::new("RENDERING_MODE", &toggle_renderers, 0x5C);
+
+#[cfg(target_os = "linux")]
+pub static BACK_BUFFER: Value<*const Image, ()> =
+    Value::from_symbol("BACK_BUFFER", "sputRender_pDrawBuffer");
+#[cfg(target_os = "linux")]
+pub static SMUSH_BUFFER: Value<*const Image, ()> = Value::from_symbol("SMUSH_BUFFER", "SmushBuf");
+#[cfg(target_os = "linux")]
+pub static DECOMPRESSION_BUFFER: Value<*const Image, ()> =
+    Value::from_symbol("DECOMPRESSION_BUFFER", "sputRender_pDecompressionBuffer");
+#[cfg(target_os = "linux")]
+pub static CLEAN_BUFFER: Value<*const Image, ()> =
+    Value::from_symbol("CLEAN_BUFFER", "sputRender_pCleanBuffer");
+#[cfg(target_os = "linux")]
+pub static CLEAN_Z_BUFFER: Value<*const Image, ()> =
+    Value::from_symbol("CLEAN_Z_BUFFER", "sputRender_pCleanZBuffer");
+#[cfg(target_os = "linux")]
+pub static ACTIVE_SMUSH_FRAME: Value<*const SmushFrame, ()> =
+    Value::from_symbol("ACTIVE_SMUSH_FRAME", "smush_pInternalBitmap");
+#[cfg(target_os = "linux")]
+pub static BITMAP_UNDERLAYS_RENDER_PASS: Value<*const RenderPass, ()> =
+    Value::from_symbol("BITMAP_UNDERLAYS_RENDER_PASS", "passBitmapUnderlays");
+#[cfg(target_os = "linux")]
+pub static TEXTURED_QUAD_SHADER: Value<*const Shader, ()> =
+    Value::from_symbol("TEXTURED_QUAD_SHADER", "pTexturedQuadShader");
+#[cfg(target_os = "linux")]
+pub static GAME_WINDOW: Value<*const c_void, ()> = Value::from_symbol("GAME_WINDOW", "pWindow");
+#[cfg(target_os = "linux")]
+pub static RENDERING_MODE: Value<f32, ()> =
+    Value::from_symbol("RENDERING_MODE", "zg_Render_useSoftwareRenderer");
+
+// ---- Struct definitions ----
+// These are #[repr(C)] and identical between MSVC and GCC for these types.
 
 /// LLVM's libc++ std::vector
 #[repr(C)]
@@ -168,7 +322,11 @@ pub struct Vector<T> {
 
 impl<T: Sized> Vector<T> {
     pub unsafe fn data(&self) -> &[T] {
-        std::slice::from_raw_parts(self.start, self.len())
+        if self.start.is_null() {
+            &[]
+        } else {
+            std::slice::from_raw_parts(self.start, self.len())
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -176,7 +334,8 @@ impl<T: Sized> Vector<T> {
             0
         } else {
             let span = self.end as usize - self.start as usize;
-            1 + (span / std::mem::size_of::<T>())
+            // end points past the last element (libc++ vector convention)
+            span / std::mem::size_of::<T>()
         }
     }
 }
@@ -189,27 +348,55 @@ pub struct RenderPass {
     pub field_3: *const c_void,
 }
 
-/// An entity that will be drawn when associated with a render pass
+/// A hardware draw call entity (zgHardwareDrawCall) -- 252 bytes (0xfc).
+///
+/// Layout confirmed from disassembly of zg_RendererHardware_Draw_Issue:
+///   +0x00: draw type
+///   +0x04: shader pipeline pointer
+///   +0x08: constant buffer 1 data (8 bytes) + param (4 bytes)
+///   +0x14: constant buffer 2 data (8 bytes) + param (4 bytes)
+///   +0x20: depth func, depth enable
+///   +0x28: blend src, blend dst
+///   +0x30: texture count
+///   +0x34: textures[8] (Surface pointers) -- surfaces[0] is the key field
+///   +0x54: sampler count
+///   +0x58: samplers[8]
+///   +0x78: unknown (96 bytes)
+///   +0xD8: draw params
+///   +0xE0: vertex buffer
+///   +0xE4: indexed flag
+///   +0xE8: scissor enabled
+///   +0xEC: scissor rect (16 bytes)
 #[repr(C)]
 pub struct RenderPassEntity {
-    pub field_1: u32,
-    pub shader_pipeline: *const c_void,
-    pub field_3: u32,
-    pub field_4: *const c_void,
-
-    pub fields_5_12: [u32; 8],
-
-    pub field_13: u32,
-    pub surface: *const Surface,
-    pub field_15: u32,
-    pub field_16: u32,
-
-    pub fields_17_31: [u32; 15],
+    pub draw_type: u32,                    // +0x00
+    pub shader_pipeline: *const c_void,    // +0x04
+    pub constant_buf_1: [u32; 3],          // +0x08
+    pub constant_buf_2: [u32; 3],          // +0x14
+    pub depth_func: u32,                   // +0x20
+    pub depth_enable: u32,                 // +0x24
+    pub blend_src: u32,                    // +0x28
+    pub blend_dst: u32,                    // +0x2C
+    pub texture_count: u32,                // +0x30
+    pub surface: *const Surface,           // +0x34 (textures[0])
+    pub textures_1_7: [*const Surface; 7], // +0x38
+    pub sampler_count: u32,                // +0x54
+    pub samplers: [u32; 8],                // +0x58
+    pub _unknown_78: [u32; 24],            // +0x78 (96 bytes)
+    pub draw_param_1: u32,                 // +0xD8
+    pub draw_param_2: u32,                 // +0xDC
+    pub vertex_buffer: *const c_void,      // +0xE0
+    pub indexed_flag: u32,                 // +0xE4
+    pub scissor_enabled: u32,              // +0xE8
+    pub scissor_rect: [u32; 4],            // +0xEC
 }
 
-/// Data used to setup the next draw call
+/// zgRenderContext -- the draw state passed to zg_RenderContext_DrawSetup.
 ///
-/// The actual structure is much larger but it's not needed yet
+/// Layout confirmed from disassembly of bindTextures and applySamplerState:
+///   +0x28: sampler_ids[8]  (8 x GLuint)
+///   +0x48: shader pointer
+///   +0x68: surfaces[8]     (8 x Surface*)
 #[repr(C)]
 pub struct Draw {
     pub field_1: u32,
@@ -217,15 +404,14 @@ pub struct Draw {
     pub render_target: *const c_void,
     pub depth_drawbuffer: c_int,
 
-    pub fields_4_10: [u32; 6],
+    pub _fields_10_27: [u32; 6], // +0x10 to +0x27
 
-    pub framebuffer: c_uint,
-    pub samplers: [c_uint; 8],
-    pub shader: *const Shader,
+    pub samplers: [c_uint; 8], // +0x28
+    pub shader: *const Shader, // +0x48
 
-    pub fields_14_21: [u32; 7],
+    pub _fields_4c_67: [u32; 7], // +0x4C to +0x67
 
-    pub surfaces: [*const Surface; 8],
+    pub surfaces: [*const Surface; 8], // +0x68
 }
 
 /// A compiled shader program with vertex and fragment shaders attached

@@ -4,7 +4,11 @@ use std::ffi::{c_int, c_uint, c_void};
 
 use crate::{direct_fns, indirect_fns};
 
-// static imports
+// ---- Static GL imports ----
+// Windows: IAT binding via symbol ident, stdcall calling convention
+// Linux: GOT binding via symbol string literal, C calling convention
+
+#[cfg(target_os = "windows")]
 indirect_fns! {
     #![bind_with(bind_static_fns)]
 
@@ -36,7 +40,7 @@ indirect_fns! {
     #[symbol(glEnable)]
     extern "stdcall" fn enable(cap: Enum);
 
-    #[symbol(glEnable)]
+    #[symbol(glDisable)]
     extern "stdcall" fn disable(cap: Enum);
 
     #[symbol(glColorMask)]
@@ -49,7 +53,56 @@ indirect_fns! {
     extern "stdcall" fn clear(mask: u32);
 }
 
-// dynamic imports
+#[cfg(target_os = "linux")]
+indirect_fns! {
+    #![bind_with(bind_static_fns)]
+
+    #[symbol("glGetError")]
+    extern "C" fn get_error() -> Enum;
+
+    #[symbol("glTexImage2D")]
+    extern "C" fn tex_image_2d(
+        target: Enum,
+        level: Int,
+        internalformat: Int,
+        width: Sizei,
+        height: Sizei,
+        border: Int,
+        format: Enum,
+        typ: Enum,
+        data: *const c_void,
+    );
+
+    #[symbol("glPixelStorei")]
+    extern "C" fn pixel_storei(pname: Enum, param: Int);
+
+    #[symbol("glGetIntegerv")]
+    extern "C" fn get_integerv(pname: Enum, params: *mut Int);
+
+    #[symbol("glDeleteTextures")]
+    extern "C" fn delete_textures(n: Sizei, textures: *const Uint);
+
+    #[symbol("glEnable")]
+    extern "C" fn enable(cap: Enum);
+
+    #[symbol("glDisable")]
+    extern "C" fn disable(cap: Enum);
+
+    #[symbol("glColorMask")]
+    extern "C" fn color_mask(red: Uint, green: Uint, blue: Uint, alpha: Uint);
+
+    #[symbol("glDepthMask")]
+    extern "C" fn depth_mask(flag: Uint);
+
+    #[symbol("glClear")]
+    extern "C" fn clear(mask: u32);
+}
+
+// ---- Dynamic GL imports ----
+// Windows: resolved at runtime via GetProcAddress("opengl32.dll"), stdcall
+// Linux: resolved at runtime via dlsym(RTLD_DEFAULT), extern "C"
+
+#[cfg(target_os = "windows")]
 direct_fns! {
     #![bind_with(bind_dynamic_fns)]
 
@@ -66,7 +119,28 @@ direct_fns! {
     extern "stdcall" fn stencil_mask(mask: Uint);
 }
 
-// glew imports
+#[cfg(target_os = "linux")]
+direct_fns! {
+    #![bind_with(bind_dynamic_fns)]
+
+    #[symbol("glDrawArrays")]
+    extern "C" fn draw_arrays(mode: Enum, first: Int, count: Sizei);
+
+    #[symbol("glStencilFunc")]
+    extern "C" fn stencil_func(func: Enum, ref_value: Int, mask: Uint);
+
+    #[symbol("glStencilOp")]
+    extern "C" fn stencil_op(sfail: Enum, dpfail: Enum, dppass: Enum);
+
+    #[symbol("glStencilMask")]
+    extern "C" fn stencil_mask(mask: Uint);
+}
+
+// ---- GLEW imports ----
+// Windows: IAT binding to __glew* globals, stdcall
+// Linux: GOT binding to __glew* globals, extern "C"
+
+#[cfg(target_os = "windows")]
 indirect_fns! {
     #![bind_with(bind_glew_fns)]
 
@@ -149,11 +223,112 @@ indirect_fns! {
     );
 }
 
+#[cfg(target_os = "linux")]
+indirect_fns! {
+    #![bind_with(bind_glew_fns)]
+
+    #[symbol("__glewSamplerParameteri")]
+    extern "C" fn sampler_parameteri(sampler: Uint, pname: Enum, param: Int);
+
+    #[symbol("__glewBlendFuncSeparate")]
+    extern "C" fn blend_func_separate(
+        src_rgb: Enum,
+        dst_rgb: Enum,
+        src_alpha: Enum,
+        dst_alpha: Enum
+    );
+
+    #[symbol("__glewBindBuffer")]
+    extern "C" fn bind_buffer(target: Enum, buffer: Uint);
+
+    #[symbol("__glewBufferData")]
+    extern "C" fn buffer_data(target: Enum, size: Sizei, data: *mut c_void, usage: Enum);
+
+    #[symbol("__glewGenBuffers")]
+    extern "C" fn gen_buffers(n: Sizei, buffers: *mut Uint);
+
+    #[symbol("__glewVertexAttribPointer")]
+    extern "C" fn vertex_attrib_pointer(
+        index: Uint,
+        size: Int,
+        typ: Enum,
+        normalized: Uint,
+        stride: Sizei,
+        pointer: *const c_void
+    );
+
+    #[symbol("__glewEnableVertexAttribArray")]
+    extern "C" fn enable_vertex_attrib_array(index: Uint);
+
+    #[symbol("__glewDrawElementsBaseVertex")]
+    extern "C" fn draw_elements_base_vertex(
+        mode: Enum,
+        count: Sizei,
+        typ: Enum,
+        indicies: *mut c_void,
+        basevertex: Int
+    );
+
+    #[symbol("__glewGenVertexArrays")]
+    extern "C" fn gen_vertex_arrays(n: Sizei, arrays: *mut Uint);
+
+    #[symbol("__glewBindVertexArray")]
+    extern "C" fn bind_vertex_array(array: Uint);
+
+    #[symbol("__glewGenRenderbuffers")]
+    extern "C" fn gen_renderbuffers(n: Sizei, renderbuffers: *mut Uint);
+
+    #[symbol("__glewBindRenderbuffer")]
+    extern "C" fn bind_renderbuffer(target: Enum, renderbuffer: Uint);
+
+    #[symbol("__glewRenderbufferStorage")]
+    extern "C" fn renderbuffer_storage(
+        target: Enum,
+        internalformat: Enum,
+        width: Sizei,
+        height: Sizei
+    );
+
+    #[symbol("__glewFramebufferRenderbuffer")]
+    extern "C" fn framebuffer_renderbuffer(
+        target: Enum,
+        attachment: Enum,
+        renderbuffertarget: Enum,
+        renderbuffer: Uint
+    );
+
+    #[symbol("__glewCompressedTexImage2D")]
+    extern "C" fn compressed_tex_image2d(
+        target: Enum,
+        level: Int,
+        internalformat: Enum,
+        width: Sizei,
+        height: Sizei,
+        border: Int,
+        image_size: Sizei,
+        data: *const c_void
+    );
+
+    #[symbol("__glewCompressedTexImage2DARB")]
+    extern "C" fn compressed_tex_image2d_arb(
+        target: Enum,
+        level: Int,
+        internalformat: Enum,
+        width: Sizei,
+        height: Sizei,
+        border: Int,
+        image_size: Sizei,
+        data: *const c_void
+    );
+}
+
+// ---- GL type aliases ----
 pub type Uint = c_uint;
 pub type Int = c_int;
 pub type Enum = c_uint;
 pub type Sizei = c_int;
 
+// ---- GL constants ----
 pub const TRIANGLES: Enum = 0x0004;
 pub const UNPACK_ROW_LENGTH: Enum = 0x0CF2;
 pub const TEXTURE_2D: Enum = 0x0DE1;
