@@ -14,6 +14,8 @@ use windows::Win32::Foundation::{BOOL, HMODULE};
 use windows::Win32::System::LibraryLoader::DisableThreadLibraryCalls;
 use windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
 
+pub const VERSION: &str = env!("DLL_VERSION");
+
 #[no_mangle]
 pub extern "system" fn DllMain(
     hinstance: HMODULE,
