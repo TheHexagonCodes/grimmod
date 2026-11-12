@@ -1,0 +1,68 @@
+name: build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number'
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    env:
+      DLL_VERSION: ${{ inputs.version }}
+
+    steps:
+      - name: Validate version number
+        shell: pwsh
+        run: |
+          if ($env:DLL_VERSION -notmatch '^\d+\.\d+\.\d+$') {
+            Write-Error "Invalid version format"
+            exit 1
+          }
+
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        run: |
+          rustup show
+          rustc --version
+
+      - name: Install libvpx and pkgconf
+        run: vcpkg install libvpx:x86-windows-static pkgconf:x86-windows
+
+      - name: Configure libvpx
+        shell: pwsh
+        run: |
+          $vpx = "$env:VCPKG_INSTALLATION_ROOT\installed\x86-windows-static"
+          $pkgconf = "$env:VCPKG_INSTALLATION_ROOT\installed\x86-windows\tools\pkgconf"
+          "$pkgconf" >> $env:GITHUB_PATH
+          "PKG_CONFIG_ALLOW_CROSS=1" >> $env:GITHUB_ENV
+          "PKG_CONFIG_ALLOW_SYSTEM_LIBS=1" >> $env:GITHUB_ENV
+          "PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1" >> $env:GITHUB_ENV
+          "PKG_CONFIG_PATH=$vpx\lib\pkgconfig" >> $env:GITHUB_ENV
+          "VPX_STATIC=1" >> $env:GITHUB_ENV
+
+      - name: Verify libvpx configuration
+        shell: pwsh
+        run: |
+          pkg-config --version
+          pkg-config --modversion vpx
+          pkg-config --static --libs vpx
+
+      - name: Compile dll
+        run: cargo build --release
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ inputs.version }}
+          files: target/i686-pc-windows-msvc/release/glu32.dll
+          generate_release_notes: true
+
+permissions:
+  contents: write
